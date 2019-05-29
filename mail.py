@@ -74,8 +74,37 @@ class MailService:
             print("Error Sending")
             return False
 
-    #def is_synced(self):
-    #    history = self.service.users().history().list(userId='me', maxResults=10)
+    def print_history_from(self, id_):
+        history = self.service.users().history().list(userId='me', startHistoryId=id_, labelId="INBOX", maxResults=10).execute()["history"]
+        for record in history:
+            if not any([i in record for i in ["messagesAdded", "messagesDeleted",
+                                              "labelsAdded", "labelsRemoved"]]):
+                continue
+            print("Record with ID", record["id"], ":")
+            if "messagesAdded" in record:
+                print(" ADDED:")
+                for msg in record["messagesAdded"]:
+                    head = msg["message"]
+                    print("  Message with id", head["id"], "in thread with id",
+                          head["threadId"])
+            if "messagesDeleted" in record:
+                print(" DELETED:")
+                for msg in record["messagesDeleted"]:
+                    head = msg["message"]
+                    print("  Message with id", head["id"], "in thread with id",
+                          head["threadId"])
+            if "labelsAdded" in record:
+                print("  ADDED LABELS TO:")
+                for msg in record["labelsAdded"]:
+                    head = msg["message"]
+                    print(" Message with id", head["id"], "in thread with id",
+                          head["threadId"], "had labels", msg["labelIds"], "added")
+            if "labelsRemoved" in record:
+                print(" REMOVED LABELS FROM:")
+                for msg in record["labelsRemoved"]:
+                    head = msg["message"]
+                    print("  Message with id", head["id"], "in thread with id",
+                          head["threadId"], "had labels", msg["labelIds"], "removed")
 
 class MailboxView:
     """Purpose: Show an interactive list of all messages in a mailbox"""
@@ -102,6 +131,7 @@ class MailboxView:
 
         self.current_thread = IntVar(value=0)
         self.view.bind("<<ListboxSelect>>", self.switch_current_thread)
+        self.service.print_history_from(774246)
         #Place thread snippets (titles, basically) into the Listbox widget
         self.show_threads()
 
@@ -209,9 +239,11 @@ class App:
         save.bind("<Button-1>", lambda e: self.save_draft())
         save.pack(ipadx=5)
 
-        self.to_line = Entry(self.win, textvariable="To")
+        Label(self.win, text="To:").pack()
+        self.to_line = Entry(self.win)
         self.to_line.pack()
-        self.subject_line = Entry(self.win, textvariable="Subject")
+        Label(self.win, text="Subject:").pack()
+        self.subject_line = Entry(self.win)
         self.subject_line.pack()
         self.compose_area = Text(self.win, width=30, height=30, font="TkFixedFont")
         self.compose_area.pack(fill=BOTH, expand=1)
