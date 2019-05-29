@@ -1,6 +1,6 @@
 #TODO:
 # [ ] Prettify Tk interface
-# [ ] Figure out how/when to batch Gmail API requests
+# [X] Figure out how/when to batch Gmail API requests
 # [ ] Work on performance/organizing code
 # [X] Wrap up API object/common method calls in a class
 # [X] Use threads.list instead of messages.list
@@ -51,9 +51,11 @@ class MailService:
         try:
             threads = self.service.users().threads().list(userId='me', labelIds=labels,
                                                           maxResults=maxResults).execute()["threads"]
+            batch = self.service.new_batch_http_request()
             for thread in threads:
-                msgs = self.service.users().threads().get(userId='me', id=thread["id"]).execute()["messages"]
-                thread["messages"] = msgs
+                batch.add(self.service.users().threads().get(userId='me', id=thread["id"]),
+                          callback=lambda id_, res, e, thread=thread: thread.update([("messages", res["messages"])]))
+            batch.execute()
             return threads
         except errors.HttpError:
             print("HTTP Error")
