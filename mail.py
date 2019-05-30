@@ -63,19 +63,19 @@ class MailService:
 
     def get_date(self, message):
         headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"] == "Date"][0]
+        return [pair["value"] for pair in headers if pair["name"].lower() == "date"][0]
 
     def get_sender(self, message):
         headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"] == "From"][0]
+        return [pair["value"] for pair in headers if pair["name"].lower() == "from"][0]
 
     def get_recipient(self, message):
         headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"] == "To"][0]
+        return [pair["value"] for pair in headers if pair["name"].lower() == "to"][0]
 
     def get_subject(self, message):
         headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"] == "Subject"][0]
+        return [pair["value"] for pair in headers if pair["name"].lower() == "subject"][0]
 
     def send_msg(self, to, subject, text):
         msg = MIMEText(text)
@@ -162,7 +162,11 @@ class MailboxView:
                 try:
                     message_text = msg["payload"]["parts"][0]["body"]["data"].strip()
                 except KeyError:
-                    continue
+                    try:
+                        message_text = msg["payload"]["body"]["data"].strip()
+                    except KeyError:
+                        print("Error: Can't parse email:\n\n", msg)
+                        continue
                 self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["snippet"],
                                         self.service.get_date(msg),
