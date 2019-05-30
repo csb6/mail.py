@@ -10,7 +10,7 @@
 # [X] Figure out how to update messages table with each thread's msgs/thread_id
 # [X] Redesign Gmail API so it's easier to get msgs/threads
 # [ ] Figure out how to give unique ids to drafts even when some drafts already in db
-import pickle, os, os.path, sqlite3, base64, mimetypes, json
+import pickle, os, os.path, sqlite3, base64, mimetypes, json, re, webbrowser
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -60,6 +60,10 @@ class MailService:
             return threads
         except errors.HttpError:
             print("HTTP Error")
+
+    def get_date(self, message):
+        headers = message["payload"]["headers"]
+        return [pair["value"] for pair in headers if pair["name"] == "Date"][0]
 
     def get_sender(self, message):
         headers = message["payload"]["headers"]
@@ -132,7 +136,7 @@ class MailboxView:
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         except sqlite3.OperationalError:
             self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT, snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, date VARCHAR, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         if not self.db_cursor.fetchone():
@@ -159,8 +163,9 @@ class MailboxView:
                     message_text = msg["payload"]["parts"][0]["body"]["data"].strip()
                 except KeyError:
                     continue
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?)",
+                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["snippet"],
+                                        self.service.get_date(msg),
                                         self.service.get_sender(msg),
                                         self.service.get_subject(msg), message_text))
 
@@ -174,8 +179,8 @@ class MailboxView:
     def get_thread_msgs(self, index):
         #fetchall() returns a tuple for each row
         thread_id = self.db_cursor.execute("SELECT id FROM threads WHERE db_index = ?", (index,)).fetchone()[0]
-        return [(m[0], m[1], base64.urlsafe_b64decode(m[2]).decode('utf-8'))
-                for m in self.db_cursor.execute("SELECT sender, subject, message_text FROM messages WHERE thread_id = ?", (thread_id,))]
+        return [(m[0], m[1], m[2], base64.urlsafe_b64decode(m[3]).decode('utf-8'))
+                for m in self.db_cursor.execute("SELECT date, sender, subject, message_text FROM messages WHERE thread_id = ?", (thread_id,))]
 
     def switch_current_thread(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
@@ -190,13 +195,28 @@ class MessageView:
     def __init__(self, parent, mailbox):
         self.parent = parent
         self.mailbox = mailbox
-        self.view = Text(parent, width=50, height=50, font="TkFixedFont", state="disabled")
+        self.view = Text(parent, width=50, height=50, font="TkFixedFont 12", state="disabled")
         self.view.pack(fill=BOTH, expand=1)
-        self.view.tag_configure("message_header", foreground="blue", relief="raised")
-        self.view.tag_configure("separator", foreground="blue", overstrike=True, font="TkFixedFont 25 bold")
+        self.view.tag_configure("message_header", font="TkFixedFont 14", foreground="blue", relief="raised")
+        self.view.tag_configure("separator", foreground="darkblue", overstrike=True, font="TkFixedFont 25 bold")
+        self.view.tag_configure("link", foreground="blue", underline=True)
+        self.view.tag_bind("link", "<Button-1>", self.open_link)
 
         #Switch displayed thread when user clicks on threads in ListBox
         self.mailbox.current_thread.trace_add("write", self.switch_view)
+
+    def open_link(self, event):
+        char = self.view.index(f"@{event.x},{event.y}")
+        tag = self.view.tag_names(char)
+        ranges = [str(i) for i in self.view.tag_ranges(tag)]
+        char_line, char_letter = [int(n) for n in char.split(".")]
+        #Look at every second index; will give end-bound of link's location
+        for i in range(1, len(ranges), 2):
+            line, letter = [int(n) for n in ranges[i].split(".")]
+            if line >= char_line and letter >= char_letter:
+                start, end = ranges[i-1], ranges[i]
+                break
+        webbrowser.open_new_tab(self.view.get(start, end).strip().strip("<>"))
 
     def switch_view(self, name, index, mode):
         self.view.configure(state="normal")
@@ -204,10 +224,14 @@ class MessageView:
         self.view.delete("0.0", "end")
         msgs = self.mailbox.get_thread_msgs(index)
         for msg in msgs:
-            self.view.insert("end", f"To: {USER}\nFrom: {msg[0]}\nSubject: {msg[1]}\n\n", ("message_header",))
-            self.view.insert("end", msg[2] + "\n")
+            self.view.insert("end", f"Date: {msg[0]}\nTo: {USER}\nFrom: {msg[1]}\nSubject: {msg[2]}\n\n", ("message_header",))
+            self.view.insert("end", msg[3] + "\n")
             self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
         self.view.configure(state="disabled")
+        #Make all URLs in text into clickable links
+        for i, row in enumerate(self.view.get("0.0", "end").split("\n")):
+            for match in re.finditer(r'<?https?://.+>?', row):
+                self.view.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
 
 class App:
     def __init__(self, parent):
@@ -224,7 +248,7 @@ class App:
         #Add code to close db, db_cursor when app shuts down
 
     def send_msg(self):
-        text = self.compose_area.get("1.0", "end").strip("\n")
+        text = self.compose_area.get("1.0", "end").strip()
         to = self.to_line.get()
         subject = self.subject_line.get()
         if self.service.send_msg(to, subject, text):
