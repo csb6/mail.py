@@ -23,6 +23,7 @@ from tkinter import ttk, messagebox
 SCOPES = ['https://www.googleapis.com/auth/gmail.compose',
           "https://www.googleapis.com/auth/gmail.readonly",
           "https://www.googleapis.com/auth/gmail.insert"]
+USER = "csboreo66@gmail.com"
 
 class MailService:
     def __init__(self):
@@ -59,6 +60,14 @@ class MailService:
             return threads
         except errors.HttpError:
             print("HTTP Error")
+
+    def get_sender(self, message):
+        headers = message["payload"]["headers"]
+        return [pair["value"] for pair in headers if pair["name"] == "From"][0]
+
+    def get_recipient(self, message):
+        headers = message["payload"]["headers"]
+        return [pair["value"] for pair in headers if pair["name"] == "To"][0]
 
     def get_subject(self, message):
         headers = message["payload"]["headers"]
@@ -123,7 +132,7 @@ class MailboxView:
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         except sqlite3.OperationalError:
             self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT, snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         if not self.db_cursor.fetchone():
@@ -147,11 +156,12 @@ class MailboxView:
                 #Look at thread-example.py for example of thread dict's layout
                 #This ridiculous line accesses the text/plain version of emails
                 try:
-                    message_text = msg["payload"]["parts"][0]["body"]["data"]
+                    message_text = msg["payload"]["parts"][0]["body"]["data"].strip()
                 except KeyError:
                     continue
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?)",
+                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["snippet"],
+                                        self.service.get_sender(msg),
                                         self.service.get_subject(msg), message_text))
 
     def refresh_db(self):
@@ -164,8 +174,8 @@ class MailboxView:
     def get_thread_msgs(self, index):
         #fetchall() returns a tuple for each row
         thread_id = self.db_cursor.execute("SELECT id FROM threads WHERE db_index = ?", (index,)).fetchone()[0]
-        return [base64.urlsafe_b64decode(m[0]).decode('utf-8')
-                for m in self.db_cursor.execute("SELECT message_text FROM messages WHERE thread_id = ?", (thread_id,))]
+        return [(m[0], m[1], base64.urlsafe_b64decode(m[2]).decode('utf-8'))
+                for m in self.db_cursor.execute("SELECT sender, subject, message_text FROM messages WHERE thread_id = ?", (thread_id,))]
 
     def switch_current_thread(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
@@ -180,18 +190,24 @@ class MessageView:
     def __init__(self, parent, mailbox):
         self.parent = parent
         self.mailbox = mailbox
-        self.view = Text(parent, width=50, height=50, font="TkFixedFont")
+        self.view = Text(parent, width=50, height=50, font="TkFixedFont", state="disabled")
         self.view.pack(fill=BOTH, expand=1)
+        self.view.tag_configure("message_header", foreground="blue", relief="raised")
+        self.view.tag_configure("separator", foreground="blue", overstrike=True, font="TkFixedFont 25 bold")
 
         #Switch displayed thread when user clicks on threads in ListBox
         self.mailbox.current_thread.trace_add("write", self.switch_view)
 
     def switch_view(self, name, index, mode):
+        self.view.configure(state="normal")
         index = self.mailbox.current_thread.get()
         self.view.delete("0.0", "end")
         msgs = self.mailbox.get_thread_msgs(index)
         for msg in msgs:
-            self.view.insert("end", msg + "\n******\n")
+            self.view.insert("end", f"To: {USER}\nFrom: {msg[0]}\nSubject: {msg[1]}\n\n", ("message_header",))
+            self.view.insert("end", msg[2] + "\n")
+            self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
+        self.view.configure(state="disabled")
 
 class App:
     def __init__(self, parent):
