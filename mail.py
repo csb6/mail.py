@@ -51,16 +51,17 @@ class MailService:
 
     def get_message(self, raw_msg):
         #Look at thread-example.py for example raw_msg's layout in "messages":[]
-        #Note: msg will have leftover keys/values (ex: "payload") from raw_msg
-        msg = raw_msg
-        headers, msg["labels"] = msg["payload"]["headers"], msg["labelIds"]
+        msg = {}
+        headers = raw_msg["payload"]["headers"]
+        for k in ("id", "threadId", "labelIds", "snippet", "historyId", "internalDate"):
+            msg[k] = raw_msg[k]
         msg["from"] = [pair["value"] for pair in headers if pair["name"].lower() == "from"][0]
         msg["to"] = [pair["value"] for pair in headers if pair["name"].lower() == "to"][0]
         msg["subject"] = [pair["value"] for pair in headers if pair["name"].lower() == "subject"][0]
         try:
-            msg["text"] = msg["payload"]["parts"][0]["body"]["data"].strip()
+            msg["text"] = raw_msg["payload"]["parts"][0]["body"]["data"].strip()
         except KeyError:
-            msg["text"] = msg["payload"]["body"]["data"].strip()
+            msg["text"] = raw_msg["payload"]["body"]["data"].strip()
         return msg
 
     def get_threads(self, labels, maxResults):
