@@ -49,6 +49,20 @@ class MailService:
 
         self.service = build('gmail', 'v1', credentials=creds)
 
+    def get_message(self, raw_msg):
+        #Look at thread-example.py for example raw_msg's layout in "messages":[]
+        #Note: msg will have leftover keys/values (ex: "payload") from raw_msg
+        msg = raw_msg
+        headers, msg["labels"] = msg["payload"]["headers"], msg["labelIds"]
+        msg["from"] = [pair["value"] for pair in headers if pair["name"].lower() == "from"][0]
+        msg["to"] = [pair["value"] for pair in headers if pair["name"].lower() == "to"][0]
+        msg["subject"] = [pair["value"] for pair in headers if pair["name"].lower() == "subject"][0]
+        try:
+            msg["text"] = msg["payload"]["parts"][0]["body"]["data"].strip()
+        except KeyError:
+            msg["text"] = msg["payload"]["body"]["data"].strip()
+        return msg
+
     def get_threads(self, labels, maxResults):
         try:
             threads = self.service.users().threads().list(userId='me', labelIds=labels,
@@ -66,18 +80,6 @@ class MailService:
         #Use only when displaying date onscreen; db should only store timestamp
         date = datetime.datetime.fromtimestamp(int(internalDate) / 1000)
         return date.ctime()
-
-    def get_sender(self, message):
-        headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"].lower() == "from"][0]
-
-    def get_recipient(self, message):
-        headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"].lower() == "to"][0]
-
-    def get_subject(self, message):
-        headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"].lower() == "subject"][0]
 
     def send_msg(self, to, subject, text):
         msg = MIMEText(text)
@@ -158,22 +160,16 @@ class MailboxView:
         for i, thread in enumerate(threads):
             self.db_cursor.execute("INSERT INTO threads VALUES (?,?,?,?)",
                                    (i, thread["id"], thread["snippet"], thread["historyId"]))
-            for msg in thread["messages"]:
-                #Look at thread-example.py for example of thread dict's layout
-                #This ridiculous line accesses the text/plain version of emails
+            for raw_msg in thread["messages"]:
                 try:
-                    message_text = msg["payload"]["parts"][0]["body"]["data"].strip()
+                    msg = self.service.get_message(raw_msg)
                 except KeyError:
-                    try:
-                        message_text = msg["payload"]["body"]["data"].strip()
-                    except KeyError:
-                        print("Error: Can't parse email:\n\n", msg)
-                        continue
+                    print("Error: Can't parse email:\n\n", raw_msg)
+                    continue
                 self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["snippet"],
-                                        int(msg["internalDate"]),
-                                        self.service.get_sender(msg),
-                                        self.service.get_subject(msg), message_text))
+                                        int(msg["internalDate"]), msg["from"],
+                                        msg["subject"], msg["text"]))
 
     def refresh_db(self):
         print("Database not rebuilt")
