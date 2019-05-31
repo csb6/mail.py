@@ -78,7 +78,7 @@ class MailService:
 
     def get_date(self, internalDate):
         #Use only when displaying date onscreen; db should only store timestamp
-        date = datetime.datetime.fromtimestamp(int(internalDate) / 1000)
+        date = datetime.datetime.fromtimestamp(internalDate / 1000)
         return date.ctime()
 
     def send_msg(self, to, subject, text):
@@ -140,7 +140,7 @@ class MailboxView:
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         except sqlite3.OperationalError:
             self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT, snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, date VARCHAR, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, date INT, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         if not self.db_cursor.fetchone():
