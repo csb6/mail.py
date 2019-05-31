@@ -11,6 +11,7 @@
 # [X] Redesign Gmail API so it's easier to get msgs/threads
 # [ ] Figure out how to give unique ids to drafts even when some drafts already in db
 import pickle, os, os.path, sqlite3, base64, mimetypes, json, re, webbrowser
+import datetime
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -61,9 +62,10 @@ class MailService:
         except errors.HttpError:
             print("HTTP Error")
 
-    def get_date(self, message):
-        headers = message["payload"]["headers"]
-        return [pair["value"] for pair in headers if pair["name"].lower() == "date"][0]
+    def get_date(self, internalDate):
+        #Use only when displaying date onscreen; db should only store timestamp
+        date = datetime.datetime.fromtimestamp(int(internalDate) / 1000)
+        return date.ctime()
 
     def get_sender(self, message):
         headers = message["payload"]["headers"]
@@ -169,7 +171,7 @@ class MailboxView:
                         continue
                 self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["snippet"],
-                                        self.service.get_date(msg),
+                                        int(msg["internalDate"]),
                                         self.service.get_sender(msg),
                                         self.service.get_subject(msg), message_text))
 
@@ -182,9 +184,11 @@ class MailboxView:
 
     def get_thread_msgs(self, index):
         #fetchall() returns a tuple for each row
-        thread_id = self.db_cursor.execute("SELECT id FROM threads WHERE db_index = ?", (index,)).fetchone()[0]
-        return [(m[0], m[1], m[2], base64.urlsafe_b64decode(m[3]).decode('utf-8'))
-                for m in self.db_cursor.execute("SELECT date, sender, subject, message_text FROM messages WHERE thread_id = ?", (thread_id,))]
+        thread_id = self.db_cursor.execute("SELECT id FROM threads WHERE db_index = ?",
+                                           (index,)).fetchone()[0]
+        return [(self.service.get_date(m[0]), m[1], m[2],
+                 base64.urlsafe_b64decode(m[3]).decode('utf-8'))
+                for m in self.db_cursor.execute("SELECT date, sender, subject, message_text FROM messages WHERE thread_id = ? ORDER BY date DESC", (thread_id,))]
 
     def switch_current_thread(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
