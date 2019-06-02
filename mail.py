@@ -180,12 +180,11 @@ class MailboxView:
         self.titles.set([t[0][:125] for t in self.db_cursor.execute("SELECT snippet FROM threads")])
 
     def get_thread_msgs(self, index):
-        #fetchall() returns a tuple for each row
-        thread_id = self.db_cursor.execute("SELECT id FROM threads WHERE db_index = ?",
-                                           (index,)).fetchone()[0]
-        return [(self.service.get_date(m[0]), m[1], m[2],
-                 base64.urlsafe_b64decode(m[3]).decode('utf-8'))
-                for m in self.db_cursor.execute("SELECT date, sender, subject, message_text FROM messages WHERE thread_id = ? ORDER BY date DESC", (thread_id,))]
+        msgs = []
+        for m in self.db_cursor.execute("SELECT date, sender, subject, message_text FROM messages m JOIN threads t ON t.id = m.thread_id AND t.db_index = ? ORDER BY date DESC", (index,)):
+            msgs.append([self.service.get_date(m[0]), m[1], m[2],
+                         base64.urlsafe_b64decode(m[3]).decode('utf-8')])
+        return msgs
 
     def switch_current_thread(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
