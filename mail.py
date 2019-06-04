@@ -56,8 +56,9 @@ class MailService:
         #Look at thread-example.py for example raw_msg's layout in "messages":[]
         msg = {}
         headers = raw_msg["payload"]["headers"]
-        for k in ("id", "threadId", "labelIds", "snippet", "historyId", "internalDate"):
+        for k in ("id", "threadId", "labelIds", "snippet", "historyId"):
             msg[k] = raw_msg[k]
+        msg["internalDate"] = int(raw_msg["internalDate"])
         msg["from"] = [pair["value"] for pair in headers if pair["name"].lower() == "from"][0]
         msg["to"] = [pair["value"] for pair in headers if pair["name"].lower() == "to"][0]
         msg["subject"] = [pair["value"] for pair in headers if pair["name"].lower() == "subject"][0]
@@ -97,8 +98,38 @@ class MailService:
             print("Error Sending")
             return False
 
+    def get_curr_history_id(self, curr_id, label):
+        return self.service.users().history().list(userId='me', startHistoryId=curr_id, labelId=label, maxResults=1).execute()["historyId"]
+
+    def is_synced(self, curr_id, label):
+        print("Current id:", curr_id, "Mailbox id:", self.get_curr_history_id(curr_id, label))
+        return self.get_curr_history_id(curr_id, label) == curr_id
+
+    def get_mail_diff(self, curr_id, label):
+        history = self.service.users().history().list(userId='me', startHistoryId=curr_id, labelId=label).execute()
+        added, deleted, label_added, label_removed = [], [], [], []
+        batch = self.service.new_batch_http_request()
+        for record in history["history"]:
+            if "messagesAdded" in record:
+                for i, header in enumerate(record["messagesAdded"]):
+                    #added.append(header["message"]["id"])
+                    batch.add(self.service.users().messages().get(userId='me', id=header["message"]["id"]), callback=lambda id_, res, e, added=added: added.insert(i, self.get_message(res)))
+            if "messagesDeleted" in record:
+                for header in record["messagesDeleted"]:
+                    deleted.append(header["message"]["id"])
+            if "labelsAdded" in record:
+                for header in record["labelsAdded"]:
+                    diff = (header["message"]["id"], header["labelIds"])
+                    label_added.append(diff)
+            if "labelsRemoved" in record:
+                for header in record["labelsRemoved"]:
+                    diff = (header["message"]["id"], header["labelIds"])
+                    label_removed.append(diff)
+        batch.execute()
+        return added, deleted, label_added, label_removed
+
     def print_history_from(self, id_):
-        history = self.service.users().history().list(userId='me', startHistoryId=id_, labelId="INBOX", maxResults=10).execute()["history"]
+        history = self.service.users().history().list(userId='me', startHistoryId=id_, labelId="INBOX").execute()["history"]
         for record in history:
             if not any([i in record for i in ["messagesAdded", "messagesDeleted",
                                               "labelsAdded", "labelsRemoved"]]):
@@ -144,17 +175,18 @@ class MailboxView:
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         except sqlite3.OperationalError:
             self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT, snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, snippet VARCHAR, date INT, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, history_id INT, snippet VARCHAR, date INT, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE config (key VARCHAR, value INT)")
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         if not self.db_cursor.fetchone():
             self.build_db()
         else:
+            self.history_id = self.db_cursor.execute("SELECT value FROM config WHERE key = ?", ("history_id",)).fetchone()[0]
             self.refresh_db()
 
         self.current_thread = IntVar(value=0)
         self.view.bind("<<ListboxSelect>>", self.switch_current_thread)
-        self.service.print_history_from(774246)
         #Place thread snippets (titles, basically) into the Listbox widget
         self.show_threads()
 
@@ -170,13 +202,37 @@ class MailboxView:
                 except KeyError:
                     print("Error: Can't parse email:\n\n", raw_msg)
                     continue
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?)",
-                                       (msg["id"], msg["threadId"], msg["snippet"],
-                                        int(msg["internalDate"]), msg["from"],
-                                        msg["subject"], msg["text"]))
+                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)",
+                                       (msg["id"], msg["threadId"], msg["historyId"],
+                                        msg["snippet"], msg["internalDate"],
+                                        msg["from"], msg["subject"], msg["text"]))
+        curr_history_id = self.db_cursor.execute("SELECT history_id FROM threads ORDER BY history_id DESC LIMIT 1").fetchone()[0]
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id", curr_history_id))
 
     def refresh_db(self):
         print("Database not rebuilt")
+        if self.service.is_synced(self.history_id, "INBOX"):
+            print("Mailbox synced")
+        else:
+            print("Mailbox not yet synced")
+            try:
+                added, deleted, label_added, label_removed = self.service.get_mail_diff(self.history_id, "INBOX")
+            except KeyError:
+                print("No changes found")
+                return
+            new_history_id = self.service.get_curr_history_id(self.history_id, "INBOX")
+            for msg_id, labels in label_removed:
+                if any([l in self.labels for l in labels]):
+                    self.db_cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+            for msg in added:
+                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)",
+                                       (msg["id"], msg["threadId"], msg["historyId"],
+                                        msg["snippet"], msg["internalDate"],
+                                        msg["from"], msg["subject"], msg["text"]))
+            self.service.print_history_from(self.history_id)
+            self.history_id = new_history_id
+            self.db_cursor.execute("DELETE FROM config WHERE key = ?", ("history_id",))
+            self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id", new_history_id))
 
     def show_threads(self):
         #Only show first 125 chars as preview of thread so it fits well onscreen
