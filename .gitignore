@@ -3,3 +3,7 @@ token.pickle
 *.db
 *~
 *#
+__pycache__/*
+services/*~
+services/*#
+services/__pycache__/*
