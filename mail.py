@@ -10,8 +10,7 @@
 # [X] Figure out how to update messages table with each thread's msgs/thread_id
 # [X] Redesign Gmail API so it's easier to get msgs/threads
 # [ ] Figure out how to give unique ids to drafts even when some drafts already in db
-import pickle, os, os.path, sqlite3, base64, mimetypes, json, re, webbrowser
-import datetime
+import pickle, os, sqlite3, base64, mimetypes, json, re, webbrowser, datetime, sys
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -25,6 +24,10 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.compose',
           "https://www.googleapis.com/auth/gmail.readonly",
           "https://www.googleapis.com/auth/gmail.insert"]
 USER = "csboreo66@gmail.com"
+if sys.platform == "darwin":
+    LINK_CURSOR = "pointinghand"
+else:
+    LINK_CURSOR = "hand1"
 
 class MailService:
     def __init__(self):
@@ -204,6 +207,8 @@ class MessageView:
         self.view.tag_configure("message_header", font="TkFixedFont 14", foreground="blue", relief="raised")
         self.view.tag_configure("separator", foreground="darkblue", overstrike=True, font="TkFixedFont 25 bold")
         self.view.tag_configure("link", foreground="blue", underline=True)
+        self.view.tag_bind("link", "<Enter>", lambda e: self.view.config(cursor=LINK_CURSOR))
+        self.view.tag_bind("link", "<Leave>", lambda e: self.view.config(cursor="left_ptr"))
         self.view.tag_bind("link", "<Button-1>", self.open_link)
 
         #Switch displayed thread when user clicks on threads in ListBox
@@ -234,7 +239,7 @@ class MessageView:
         self.view.configure(state="disabled")
         #Make all URLs in text into clickable links
         for i, row in enumerate(self.view.get("0.0", "end").split("\n")):
-            for match in re.finditer(r'<?https?://.+>?', row):
+            for match in re.finditer(r'<?https?://.+>?(\s|$)', row):
                 self.view.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
 
 class App:
