@@ -57,12 +57,7 @@ class MailboxView:
         for i, thread in enumerate(threads):
             self.db_cursor.execute("INSERT INTO threads VALUES (?,?,?,?)",
                                    (i, thread["id"], thread["snippet"], thread["historyId"]))
-            for raw_msg in thread["messages"]:
-                try:
-                    msg = self.service.get_message(raw_msg)
-                except KeyError:
-                    print("Error: Can't parse email:\n\n", raw_msg)
-                    continue
+            for msg in thread["messages"]:
                 self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["historyId"],
                                         msg["snippet"], msg["internalDate"],

@@ -49,6 +49,16 @@ class MailService:
             msg["text"] = raw_msg["payload"]["body"]["data"].strip()
         return msg
 
+    def add_thread_msgs(self, res, thread):
+        thread["messages"] = []
+        for raw_msg in res["messages"]:
+                try:
+                    msg = self.get_message(raw_msg)
+                except KeyError:
+                    print("Error: Can't parse email:\n\n", raw_msg)
+                    continue
+                thread["messages"].append(msg)
+
     def get_threads(self, labels, maxResults):
         try:
             threads = self.service.users().threads().list(userId='me', labelIds=labels,
@@ -56,7 +66,7 @@ class MailService:
             batch = self.service.new_batch_http_request()
             for thread in threads:
                 batch.add(self.service.users().threads().get(userId='me', id=thread["id"]),
-                          callback=lambda id_, res, e, thread=thread: thread.update([("messages", res["messages"])]))
+                          callback=lambda id_, res, e, thread=thread: self.add_thread_msgs(res, thread))
             batch.execute()
             return threads
         except errors.HttpError:
