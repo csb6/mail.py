@@ -90,7 +90,7 @@ class MailService:
             return False
 
     def get_curr_history_id(self, curr_id, label):
-        return self.service.users().history().list(userId='me', startHistoryId=curr_id, labelId=label, maxResults=1).execute()["historyId"]
+        return int(self.service.users().history().list(userId='me', startHistoryId=curr_id, labelId=label, maxResults=1).execute()["historyId"])
 
     def is_synced(self, curr_id, label):
         print("Current id:", curr_id, "Mailbox id:", self.get_curr_history_id(curr_id, label))

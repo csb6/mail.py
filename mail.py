@@ -36,7 +36,7 @@ class MailboxView:
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         except sqlite3.OperationalError:
             self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT, snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, history_id INT, snippet VARCHAR, date INT, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, history_id INT, label VARCHAR, snippet VARCHAR, date INT, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR, subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE config (key VARCHAR, value INT)")
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
@@ -58,10 +58,11 @@ class MailboxView:
             self.db_cursor.execute("INSERT INTO threads VALUES (?,?,?,?)",
                                    (i, thread["id"], thread["snippet"], thread["historyId"]))
             for msg in thread["messages"]:
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)",
+                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["historyId"],
-                                        msg["snippet"], msg["internalDate"],
-                                        msg["from"], msg["subject"], msg["text"]))
+                                        msg["labelIds"][0], msg["snippet"],
+                                        msg["internalDate"], msg["from"],
+                                        msg["subject"], msg["text"]))
         curr_history_id = self.db_cursor.execute("SELECT history_id FROM threads ORDER BY history_id DESC LIMIT 1").fetchone()[0]
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id", curr_history_id))
 
@@ -77,14 +78,22 @@ class MailboxView:
                 print("No changes found")
                 return
             new_history_id = self.service.get_curr_history_id(self.history_id, "INBOX")
-            for msg_id, labels in label_removed:
-                if any([l in self.labels for l in labels]):
-                    self.db_cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+            #Create/delete messages using full msg dicts from API
+            for msg_id in deleted:
+                self.db_cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
             for msg in added:
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?)",
+                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
                                        (msg["id"], msg["threadId"], msg["historyId"],
-                                        msg["snippet"], msg["internalDate"],
-                                        msg["from"], msg["subject"], msg["text"]))
+                                        msg["labelIds"][0], msg["snippet"],
+                                        msg["internalDate"], msg["from"],
+                                        msg["subject"], msg["text"]))
+            #Add/remove labels based on (id, labelName) tuple, not full msg dict
+            for id_, label in label_removed:
+                if self.db_cursor.execute("SELECT label FROM messages WHERE id = ?",
+                                          (id_,)).fetchone() == label:
+                    self.db_cursor.execute("UPDATE messages SET label = '' WHERE id = ?", (id_,))
+            for id_, label in label_added:
+                self.db_cursor.execute("UPDATE messages SET label = ? WHERE id = ?", (label[0], id_))
             self.service.print_history_from(self.history_id)
             self.history_id = new_history_id
             self.db_cursor.execute("DELETE FROM config WHERE key = ?", ("history_id",))
