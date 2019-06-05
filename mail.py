@@ -16,6 +16,7 @@ from gmail import *
 from tkinter import *
 from tkinter import ttk, messagebox
 
+THREAD_AMT = 5
 if sys.platform == "darwin":
     LINK_CURSOR = "pointinghand"
 else:
@@ -35,15 +36,21 @@ class MailboxView:
         try:
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         except sqlite3.OperationalError:
-            self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT, snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT, history_id INT, label VARCHAR, snippet VARCHAR, date INT, sender VARCHAR, subject VARCHAR, message_text VARCHAR)")
-            self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR, subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT,"
+                                   +" snippet VARCHAR, history_id INT)")
+            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT,"
+                                   +" history_id INT, label VARCHAR, snippet VARCHAR,"
+                                   +" date INT, sender VARCHAR, subject VARCHAR,"
+                                   +" message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR,"
+                                   +" subject VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE config (key VARCHAR, value INT)")
             self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
         if not self.db_cursor.fetchone():
             self.build_db()
         else:
-            self.history_id = self.db_cursor.execute("SELECT value FROM config WHERE key = ?", ("history_id",)).fetchone()[0]
+            self.history_id = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                                     ("history_id",)).fetchone()[0]
             self.refresh_db()
 
         self.current_thread = IntVar(value=0)
@@ -52,7 +59,7 @@ class MailboxView:
         self.show_threads()
 
     def build_db(self):
-        threads = self.service.get_threads(self.labels, 5)
+        threads = self.service.get_threads(self.labels, THREAD_AMT)
         #i is the db_index field; used to identify order of threads in mailbox
         for i, thread in enumerate(threads):
             self.db_cursor.execute("INSERT INTO threads VALUES (?,?,?,?)",
@@ -63,8 +70,10 @@ class MailboxView:
                                         msg["labelIds"][0], msg["snippet"],
                                         msg["internalDate"], msg["from"],
                                         msg["subject"], msg["text"]))
-        curr_history_id = self.db_cursor.execute("SELECT history_id FROM threads ORDER BY history_id DESC LIMIT 1").fetchone()[0]
-        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id", curr_history_id))
+        curr_history_id = self.db_cursor.execute("SELECT history_id FROM threads"
+                                                 +" ORDER BY history_id DESC LIMIT 1").fetchone()[0]
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id",
+                                                                   curr_history_id))
 
     def refresh_db(self):
         print("Database not rebuilt")
@@ -93,11 +102,13 @@ class MailboxView:
                                           (id_,)).fetchone() == label:
                     self.db_cursor.execute("UPDATE messages SET label = '' WHERE id = ?", (id_,))
             for id_, label in label_added:
-                self.db_cursor.execute("UPDATE messages SET label = ? WHERE id = ?", (label[0], id_))
+                self.db_cursor.execute("UPDATE messages SET label = ? WHERE id = ?",
+                                       (label[0], id_))
             self.service.print_history_from(self.history_id)
             self.history_id = new_history_id
             self.db_cursor.execute("DELETE FROM config WHERE key = ?", ("history_id",))
-            self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id", new_history_id))
+            self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id",
+                                                                       new_history_id))
 
     def show_threads(self):
         #Only show first 125 chars as preview of thread so it fits well onscreen
@@ -105,7 +116,9 @@ class MailboxView:
 
     def get_thread_msgs(self, index):
         msgs = []
-        for m in self.db_cursor.execute("SELECT date, sender, subject, message_text FROM messages m JOIN threads t ON t.id = m.thread_id AND t.db_index = ? ORDER BY date DESC", (index,)):
+        for m in self.db_cursor.execute("SELECT date, sender, subject, message_text"
+                                        +" FROM messages m JOIN threads t ON t.id = m.thread_id"
+                                        +" AND t.db_index = ? ORDER BY date DESC", (index,)):
             msgs.append([self.service.get_date(m[0]), m[1], m[2],
                          base64.urlsafe_b64decode(m[3]).decode('utf-8')])
         return msgs
@@ -125,8 +138,10 @@ class MessageView:
         self.mailbox = mailbox
         self.view = Text(parent, width=50, height=50, font="TkFixedFont 12", state="disabled")
         self.view.pack(fill=BOTH, expand=1)
-        self.view.tag_configure("message_header", font="TkFixedFont 14", foreground="blue", relief="raised")
-        self.view.tag_configure("separator", foreground="darkblue", overstrike=True, font="TkFixedFont 25 bold")
+        self.view.tag_configure("message_header", font="TkFixedFont 14",
+                                foreground="blue", relief="raised")
+        self.view.tag_configure("separator", foreground="darkblue",
+                                overstrike=True, font="TkFixedFont 25 bold")
         self.view.tag_configure("link", foreground="blue", underline=True)
         self.view.tag_bind("link", "<Enter>", lambda e: self.view.config(cursor=LINK_CURSOR))
         self.view.tag_bind("link", "<Leave>", lambda e: self.view.config(cursor="left_ptr"))

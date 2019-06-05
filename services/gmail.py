@@ -31,7 +31,7 @@ class MailService:
                 with open('token.pickle', 'wb') as token:
                     pickle.dump(creds, token)
 
-        self.service = build('gmail', 'v1', credentials=creds)
+        self.api = build('gmail', 'v1', credentials=creds)
 
     def get_message(self, raw_msg):
         #Look at thread-example.py for example raw_msg's layout in "messages":[]
@@ -61,11 +61,11 @@ class MailService:
 
     def get_threads(self, labels, maxResults):
         try:
-            threads = self.service.users().threads().list(userId='me', labelIds=labels,
-                                                          maxResults=maxResults).execute()["threads"]
-            batch = self.service.new_batch_http_request()
+            threads = self.api.users().threads().list(userId='me', labelIds=labels,
+                                                      maxResults=maxResults).execute()["threads"]
+            batch = self.api.new_batch_http_request()
             for thread in threads:
-                batch.add(self.service.users().threads().get(userId='me', id=thread["id"]),
+                batch.add(self.api.users().threads().get(userId='me', id=thread["id"]),
                           callback=lambda id_, res, e, thread=thread: self.add_thread_msgs(res, thread))
             batch.execute()
             return threads
@@ -83,28 +83,30 @@ class MailService:
         #Must convert msg str to b-string, then base64 encode, then back to str type
         body = {"raw": base64.urlsafe_b64encode(msg.as_string().encode()).decode("utf-8")}
         try:
-            self.service.users().messages().send(userId='me', body=body).execute()
+            self.api.users().messages().send(userId='me', body=body).execute()
             return True
         except errors.HttpError:
             print("Error Sending")
             return False
 
     def get_curr_history_id(self, curr_id, label):
-        return int(self.service.users().history().list(userId='me', startHistoryId=curr_id, labelId=label, maxResults=1).execute()["historyId"])
+        return int(self.api.users().history().list(userId='me', startHistoryId=curr_id,
+                                                   labelId=label, maxResults=1).execute()["historyId"])
 
     def is_synced(self, curr_id, label):
         print("Current id:", curr_id, "Mailbox id:", self.get_curr_history_id(curr_id, label))
         return self.get_curr_history_id(curr_id, label) == curr_id
 
     def get_mail_diff(self, curr_id, label):
-        history = self.service.users().history().list(userId='me', startHistoryId=curr_id, labelId=label).execute()
+        history = self.api.users().history().list(userId='me', startHistoryId=curr_id,
+                                                  labelId=label).execute()
         added, deleted, label_added, label_removed = [], [], [], []
-        batch = self.service.new_batch_http_request()
+        batch = self.api.new_batch_http_request()
         for record in history["history"]:
             if "messagesAdded" in record:
                 for i, header in enumerate(record["messagesAdded"]):
                     #added.append(header["message"]["id"])
-                    batch.add(self.service.users().messages().get(userId='me', id=header["message"]["id"]), callback=lambda id_, res, e, added=added: added.insert(i, self.get_message(res)))
+                    batch.add(self.api.users().messages().get(userId='me', id=header["message"]["id"]), callback=lambda id_, res, e, added=added: added.insert(i, self.get_message(res)))
             if "messagesDeleted" in record:
                 for header in record["messagesDeleted"]:
                     deleted.append(header["message"]["id"])
@@ -120,7 +122,8 @@ class MailService:
         return added, deleted, label_added, label_removed
 
     def print_history_from(self, id_):
-        history = self.service.users().history().list(userId='me', startHistoryId=id_, labelId="INBOX").execute()["history"]
+        history = self.api.users().history().list(userId='me', startHistoryId=id_,
+                                                  labelId="INBOX").execute()["history"]
         for record in history:
             if not any([i in record for i in ["messagesAdded", "messagesDeleted",
                                               "labelsAdded", "labelsRemoved"]]):
