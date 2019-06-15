@@ -1,4 +1,5 @@
-import imaplib, sys, email, email.policy, json
+import imaplib, smtplib, sys, email, email.policy, json, re, datetime
+from email.mime.text import MIMEText
 
 config_file = open("config.json")
 config = json.loads(config_file.read())
@@ -11,9 +12,17 @@ class MailService:
     def __init__(self):
         self.api = imaplib.IMAP4_SSL(HOST)
         try:
-            status, data = self.api.login(USER, PASSWORD)
+            self.api.login(USER, PASSWORD)
         except imaplib.IMAP4.error:
-            print("Error: Cannot login")
+            print("Error: Cannot login to IMAP")
+            sys.exit(1)
+
+        self.smtp = smtplib.SMTP_SSL("smtp.gmail.com")
+        try:
+            self.smtp.ehlo_or_helo_if_needed()
+            self.smtp.login(USER, PASSWORD)
+        except smtplib.SMTPException as e:
+            print("Error:", e)
             sys.exit(1)
 
     def error_check(self, status, message):
@@ -35,7 +44,13 @@ class MailService:
             msg["subject"] = raw_msg.get("Subject")
             msg["from"] = raw_msg.get("From")
             msg["to"] = raw_msg.get("To")
-            msg["internalDate"] = raw_msg.get("Date")
+            date_str = raw_msg.get("Date")
+            if re.findall(r'^[A-Za-z]{3}, [0-9]{2} [A-Za-z]{3} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} (\+|-)[0-9]{4}$', date_str):
+                date = datetime.datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z")
+                msg["internalDate"] = date.ctime()
+            else:
+                print("Time string failed to match format:", date_str)
+                msg["internalDate"] = date_str
             msg["text"] = ""
             if not raw_msg.is_multipart():
                 msg["text"] = raw_msg.get_content()
@@ -48,7 +63,14 @@ class MailService:
         return msgs
 
     def is_synced(self):
-        return self.api.recent()[1] == [None]
+        pass
 
     def send_msg(self, to, subject, text):
-        pass
+        msg = MIMEText(text)
+        msg["to"], msg["from"], msg["subject"] = to, USER, subject
+        try:
+            self.smtp.sendmail(USER, to, msg.as_string())
+            return True
+        except smtplib.SMTPException as e:
+            print("Error Sending:", e)
+            return False
