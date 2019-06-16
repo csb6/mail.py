@@ -18,8 +18,8 @@ switch to the `imap` branch.
 - Look up the hostname for your email provider, then fill out the JSON file.
 
 - For Gmail addresses, you need to create an app-specific password. Go to
-![your security preferences](https://myaccount.google.com/security) and create
-a password. Copy this password into the JSON.
+https://myaccount.google.com/security and create a password. Copy this password
+into the JSON.
 
 - Currently, there is support for downloading ~25 messages from your inbox, displaying
 the emails onscreen, and sending emails by clicking on the `Compose` button at the
