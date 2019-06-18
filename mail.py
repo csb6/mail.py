@@ -35,7 +35,7 @@ class MailboxView:
         try:
             self.db_cursor.execute("SELECT id FROM messages LIMIT 1")
         except sqlite3.OperationalError:
-            self.db_cursor.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY,"
+            self.db_cursor.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, UID INT,"
                                    + " label VARCHAR, date INT, sender VARCHAR,"
                                    + " recipient VARCHAR, subject VARCHAR,"
                                    + " message_text VARCHAR)")
@@ -55,15 +55,23 @@ class MailboxView:
         self.show_subjects()
 
     def build_db(self):
-        messages = self.service.get_msgs(self.label, "SINCE 11-May-2019")
+        messages = self.service.get_msgs(self.label, "SINCE 1-May-2019")
+        self.last_uid = messages[-1]["uid"]
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
         for msg in messages:
-            self.db_cursor.execute("INSERT INTO messages (label, date, sender, recipient,"
-                                   + " subject, message_text) VALUES (?,?,?,?,?,?)",
-                                   (self.label, msg["internalDate"], msg["from"],
+            self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
+                                   + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
+                                   (msg["uid"], self.label, msg["internalDate"], msg["from"],
                                     msg["to"], msg["subject"], msg["text"]))
 
     def refresh_db(self):
         print("Database not rebuilt")
+        self.last_uid = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                               ("last_uid",)).fetchone()[0]
+        if self.service.is_synced(self.label, self.last_uid):
+            print("Database is synced with server")
+        else:
+            print("Database isn't synced with server")
 
     def show_subjects(self):
         #Only show first 125 chars as preview of thread so it fits well onscreen
