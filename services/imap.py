@@ -37,6 +37,13 @@ class MailService:
             print("Error: UID values have changed:", status)
             sys.exit(1)
 
+    def get_id(self, mailbox, uid):
+        print("Getting id for", type(uid), uid)
+        status, data = self.api.select(mailbox)
+        self.error_check(status, "couldn't open mailbox")
+        status, data = self.api.search(None, "UID "+str(uid))
+        return data[0]
+
     def show_msgs(self, mailbox, criteria, callback):
         print("Getting messages...")
         status, data = self.api.select(mailbox)

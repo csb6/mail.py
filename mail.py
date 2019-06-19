@@ -72,11 +72,20 @@ class MailboxView:
                                + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
                                (msg["uid"], self.label, msg["internalDate"], msg["from"],
                                 msg["to"], msg["subject"], msg["text"]))
-    def build_db(self):
+    def build_db(self, msg):
         self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
                                                              self.create_msg)
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt", self.msg_amt))
+
+    def add_updated_msg(self, msg):
+        if not self.db_cursor.execute("SELECT id FROM messages WHERE uid = ?",
+                                      (msg["uid"],)).fetchone():
+            print("Added", msg["uid"])
+            self.create_msg(msg)
+        else:
+            #Do not re-add duplicate messages
+            print("Database already has", msg["uid"])
 
     def refresh_db(self):
         print("Database not rebuilt")
@@ -88,7 +97,15 @@ class MailboxView:
             print("Database is synced with server")
         else:
             print("Database isn't synced with server")
-            
+            criteria = self.service.get_id(self.label, self.last_uid) + b':*'
+            self.last_uid, added_msg_amt = self.service.show_msgs(self.label, criteria,
+                                                                 self.add_updated_msg)
+            self.msg_amt += added_msg_amt
+            self.db_cursor.execute("UPDATE config SET value = ? WHERE key = ?",
+                                   (self.last_uid, "last_uid"))
+            self.db_cursor.execute("UPDATE config SET value = ? WHERE key = ?",
+                                   (self.msg_amt, "msg_amt"))
+            print("Database now synced")
 
     def show_subjects(self):
         for id_, subject in self.db_cursor.execute("SELECT id, subject FROM messages WHERE label = ?", (self.label,)):
