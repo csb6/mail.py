@@ -57,7 +57,9 @@ class MailboxView:
     def build_db(self):
         messages = self.service.get_msgs(self.label, "SINCE 1-May-2019")
         self.last_uid = messages[-1]["uid"]
+        self.msg_amt = len(messages)
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt", self.msg_amt))
         for msg in messages:
             self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
                                    + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
@@ -68,10 +70,13 @@ class MailboxView:
         print("Database not rebuilt")
         self.last_uid = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
                                                ("last_uid",)).fetchone()[0]
-        if self.service.is_synced(self.label, self.last_uid):
+        self.msg_amt = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                              ("msg_amt",)).fetchone()[0]
+        if self.service.is_synced(self.label, self.last_uid, self.msg_amt):
             print("Database is synced with server")
         else:
             print("Database isn't synced with server")
+            
 
     def show_subjects(self):
         #Only show first 125 chars as preview of thread so it fits well onscreen

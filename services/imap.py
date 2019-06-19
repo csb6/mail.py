@@ -75,12 +75,15 @@ class MailService:
         print(" All messages downloaded")
         return msgs
 
-    def is_synced(self, mailbox, last_uid):
-        status, data = self.api.select(mailbox)
+    def is_synced(self, mailbox, last_uid, client_msg_amt):
+        status, server_msg_amt = self.api.select(mailbox)
         self.error_check(status, "couldn't open mailbox")
         status, data = self.api.uid("FETCH", bytes(str(last_uid), "utf-8") + b':*', "UID")
         self.error_check(status, "couldn't perform FETCH sync")
-        return len(data) == 1
+        print(data, client_msg_amt, server_msg_amt[0])
+        #Ensure same amt of msgs as last sync, no new msgs added/removed
+        return len(data) == 1 and client_msg_amt == int(server_msg_amt[0]) \
+               and data[0].endswith(bytes(str(last_uid), "utf-8") + b')')
 
     def send_msg(self, to, subject, text):
         msg = MIMEText(text)
