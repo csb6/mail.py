@@ -1,134 +1,111 @@
 #TODO:
 # [ ] Prettify Tk interface
-# [X] Figure out how/when to batch Gmail API requests
+# [X] Figure out how/when to batch IMAP requests
 # [ ] Work on performance/organizing code
-# [X] Wrap up API object/common method calls in a class
-# [X] Use threads.list instead of messages.list
-# [X] Figure out how to limit message results to inbox
-# [X] Set-up/plan tables for sqlite3 database
-# [X] Figure out how to orient program around threads, not messages
-# [X] Figure out how to update messages table with each thread's msgs/thread_id
-# [X] Redesign Gmail API so it's easier to get msgs/threads
-# [ ] Figure out how to give unique ids to drafts even when some drafts already in db
-import os, sqlite3, json, re, webbrowser, sys
+# [ ] Finish implementing mailbox syncing
+# [ ] Add support for multiple mailboxes, shown in sidebar
+# [ ] Have db contain messages from all labels
+# [ ] Unite SQL config table with config.json
+# [ ] Determine if SSL is properly implemented/secure
+import os, sqlite3, json, re, webbrowser, sys, _tkinter
 sys.path.append("services")
-from gmail import *
+from imap import *
 from tkinter import *
 from tkinter import ttk, messagebox
 
-THREAD_AMT = 5
 if sys.platform == "darwin":
     LINK_CURSOR = "pointinghand"
 else:
     LINK_CURSOR = "hand1"
 
+def safe_insert(widget, coords, content, tags=("",)):
+    try:
+        if tags != ("",):
+            widget.insert(coords, content, tags)
+        else:
+            widget.insert(coords, content)
+    except _tkinter.TclError:
+        #Some characters can't be displayed; char code is out of range
+        #Exclude undisplayable chars (a hacky fix, but a simple one!)
+        valid_chars = [c for c in content if ord(c) in range(65536)]
+        if tags != ("",):
+            widget.insert(coords, ''.join(valid_chars), tags)
+        else:
+            widget.insert(coords, ''.join(valid_chars))
+        print("Warning: '" + content, "'has undisplayable chars in it")
+
 class MailboxView:
     """Purpose: Show an interactive list of all messages in a mailbox"""
-    def __init__(self, parent, service, labels, db_cursor):
+    def __init__(self, parent, service, label, db_cursor):
         self.parent = parent
         self.service = service
-        self.labels = labels
+        self.label = label
         self.db_cursor = db_cursor
-        self.titles = StringVar(value=[])
-        self.view = Listbox(self.parent, width=100, height=25, listvariable=self.titles)
+        self.view = Listbox(self.parent, width=100, height=25)
         self.view.pack(fill=BOTH, expand=1)
         #Need to check if db has data before trying to display messages
         try:
-            self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
+            self.db_cursor.execute("SELECT id FROM messages LIMIT 1")
         except sqlite3.OperationalError:
-            self.db_cursor.execute("CREATE TABLE threads (db_index INT, id INT,"
-                                   +" snippet VARCHAR, history_id INT)")
-            self.db_cursor.execute("CREATE TABLE messages (id INT, thread_id INT,"
-                                   +" history_id INT, label VARCHAR, snippet VARCHAR,"
-                                   +" date INT, sender VARCHAR, subject VARCHAR,"
-                                   +" message_text VARCHAR)")
-            self.db_cursor.execute("CREATE TABLE drafts (id INT, recipient VARCHAR,"
-                                   +" subject VARCHAR, message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, UID INT,"
+                                   + " label VARCHAR, date INT, sender VARCHAR,"
+                                   + " recipient VARCHAR, subject VARCHAR,"
+                                   + " message_text VARCHAR)")
+            self.db_cursor.execute("CREATE TABLE drafts (id INTEGER PRIMARY KEY,"
+                                   + " recipient VARCHAR, subject VARCHAR,"
+                                   + " message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE config (key VARCHAR, value INT)")
-            self.db_cursor.execute("SELECT id FROM threads LIMIT 1")
+            self.db_cursor.execute("SELECT id FROM messages LIMIT 1")
         if not self.db_cursor.fetchone():
             self.build_db()
         else:
-            self.history_id = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
-                                                     ("history_id",)).fetchone()[0]
             self.refresh_db()
 
-        self.current_thread = IntVar(value=0)
-        self.view.bind("<<ListboxSelect>>", self.switch_current_thread)
-        #Place thread snippets (titles, basically) into the Listbox widget
-        self.show_threads()
+        self.titles = []
+        self.current_msg = IntVar(value=0)
+        self.view.bind("<<ListboxSelect>>", self.switch_current_msg)
+        #Place subjects of each message into the Listbox widget
+        self.show_subjects()
 
+    def create_msg(self, msg):
+        self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
+                               + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
+                               (msg["uid"], self.label, msg["internalDate"], msg["from"],
+                                msg["to"], msg["subject"], msg["text"]))
     def build_db(self):
-        threads = self.service.get_threads(self.labels, THREAD_AMT)
-        #i is the db_index field; used to identify order of threads in mailbox
-        for i, thread in enumerate(threads):
-            self.db_cursor.execute("INSERT INTO threads VALUES (?,?,?,?)",
-                                   (i, thread["id"], thread["snippet"], thread["historyId"]))
-            for msg in thread["messages"]:
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
-                                       (msg["id"], msg["threadId"], msg["historyId"],
-                                        msg["labelIds"][0], msg["snippet"],
-                                        msg["internalDate"], msg["from"],
-                                        msg["subject"], msg["text"]))
-        curr_history_id = self.db_cursor.execute("SELECT history_id FROM threads"
-                                                 +" ORDER BY history_id DESC LIMIT 1").fetchone()[0]
-        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id",
-                                                                   curr_history_id))
+        self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
+                                                             self.create_msg)
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt", self.msg_amt))
 
     def refresh_db(self):
         print("Database not rebuilt")
-        if self.service.is_synced(self.history_id, "INBOX"):
-            print("Mailbox synced")
+        self.last_uid = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                               ("last_uid",)).fetchone()[0]
+        self.msg_amt = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                              ("msg_amt",)).fetchone()[0]
+        if self.service.is_synced(self.label, self.last_uid, self.msg_amt):
+            print("Database is synced with server")
         else:
-            print("Mailbox not yet synced")
-            try:
-                added, deleted, label_added, label_removed = self.service.get_mail_diff(self.history_id, "INBOX")
-            except KeyError:
-                print("No changes found")
-                return
-            new_history_id = self.service.get_curr_history_id(self.history_id, "INBOX")
-            #Create/delete messages using full msg dicts from API
-            for msg_id in deleted:
-                self.db_cursor.execute("DELETE FROM messages WHERE id = ?", (msg_id,))
-            for msg in added:
-                self.db_cursor.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?)",
-                                       (msg["id"], msg["threadId"], msg["historyId"],
-                                        msg["labelIds"][0], msg["snippet"],
-                                        msg["internalDate"], msg["from"],
-                                        msg["subject"], msg["text"]))
-            #Add/remove labels based on (id, labelName) tuple, not full msg dict
-            for id_, label in label_removed:
-                if self.db_cursor.execute("SELECT label FROM messages WHERE id = ?",
-                                          (id_,)).fetchone() == label:
-                    self.db_cursor.execute("UPDATE messages SET label = '' WHERE id = ?", (id_,))
-            for id_, label in label_added:
-                self.db_cursor.execute("UPDATE messages SET label = ? WHERE id = ?",
-                                       (label[0], id_))
-            self.service.print_history_from(self.history_id)
-            self.history_id = new_history_id
-            self.db_cursor.execute("DELETE FROM config WHERE key = ?", ("history_id",))
-            self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("history_id",
-                                                                       new_history_id))
+            print("Database isn't synced with server")
+            
 
-    def show_threads(self):
-        #Only show first 125 chars as preview of thread so it fits well onscreen
-        self.titles.set([t[0][:125] for t in self.db_cursor.execute("SELECT snippet FROM threads")])
+    def show_subjects(self):
+        for id_, subject in self.db_cursor.execute("SELECT id, subject FROM messages WHERE label = ?", (self.label,)):
+            safe_insert(self.view, "end", subject)
+            #Map index in Listbox to id of message to retrieve
+            self.titles.append(id_)
 
-    def get_thread_msgs(self, index):
-        msgs = []
-        for m in self.db_cursor.execute("SELECT date, sender, subject, message_text"
-                                        +" FROM messages m JOIN threads t ON t.id = m.thread_id"
-                                        +" AND t.db_index = ? ORDER BY date DESC", (index,)):
-            msgs.append([self.service.get_date(m[0]), m[1], m[2],
-                         base64.urlsafe_b64decode(m[3]).decode('utf-8')])
-        return msgs
+    def get_msg(self, index):
+        return self.db_cursor.execute("SELECT date, sender, subject, message_text"
+                                      +" FROM messages WHERE id = ? ORDER BY date DESC",
+                                      (self.titles[index],)).fetchone()
 
-    def switch_current_thread(self, event):
+    def switch_current_msg(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
-        #self.current_thread
-        if len(self.titles.get()) != 0:
-            #curselection() gives list of selected thread titles; just take 1
-            self.current_thread.set(self.view.curselection()[0])
+        #self.current_msg
+        #curselection() gives list of selected thread titles; just take 1
+        self.current_msg.set(self.view.curselection()[0])
 
 class MessageView:
     """Purpose: Represents text widget at screen bottom; contains text of message(s)
@@ -148,7 +125,7 @@ class MessageView:
         self.view.tag_bind("link", "<Button-1>", self.open_link)
 
         #Switch displayed thread when user clicks on threads in ListBox
-        self.mailbox.current_thread.trace_add("write", self.switch_view)
+        self.mailbox.current_msg.trace_add("write", self.switch_view)
 
     def open_link(self, event):
         char = self.view.index(f"@{event.x},{event.y}")
@@ -165,13 +142,12 @@ class MessageView:
 
     def switch_view(self, name, index, mode):
         self.view.configure(state="normal")
-        index = self.mailbox.current_thread.get()
+        index = self.mailbox.current_msg.get()
         self.view.delete("0.0", "end")
-        msgs = self.mailbox.get_thread_msgs(index)
-        for msg in msgs:
-            self.view.insert("end", f"Date: {msg[0]}\nTo: {USER}\nFrom: {msg[1]}\nSubject: {msg[2]}\n\n", ("message_header",))
-            self.view.insert("end", msg[3] + "\n")
-            self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
+        msg = self.mailbox.get_msg(index)
+        safe_insert(self.view, "end", f"Date: {msg[0]}\nTo: {USER}\nFrom: {msg[1]}\nSubject: {msg[2]}\n\n", tags=("message_header",))
+        safe_insert(self.view, "end", msg[3] + "\n")
+        self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
         self.view.configure(state="disabled")
         #Make all URLs in text into clickable links
         for i, row in enumerate(self.view.get("0.0", "end").split("\n")):
@@ -187,9 +163,8 @@ class App:
         self.service = MailService()
         self.db = sqlite3.connect('mail.db')
         self.db_cursor = self.db.cursor()
-        self.inbox = MailboxView(self.parent, self.service, ["INBOX"], self.db_cursor)
+        self.inbox = MailboxView(self.parent, self.service, "INBOX", self.db_cursor)
         self.content_view = MessageView(self.parent, self.inbox)
-        self.draft_id = 0
         #Add code to close db, db_cursor when app shuts down
 
     def send_msg(self):
@@ -207,13 +182,12 @@ class App:
         subject = self.subject_line.get()
         text = self.compose_area.get("1.0", "end")
         try:
-            self.db_cursor.execute("INSERT INTO drafts VALUES (?,?,?,?)",
-                                   (self.draft_id, to, subject, text))
+            self.db_cursor.execute("INSERT INTO drafts (recipient, subject, message_text)"
+                                   + " VALUES (?,?,?)", (to, subject, text))
         except sqlite3.Error:
             messagebox.showinfo(message="Error: Draft failed to save")
         else:
             messagebox.showinfo(message="Draft saved successfully")
-            self.draft_id += 1
             self.win.destroy()
 
     def compose_msg(self):
