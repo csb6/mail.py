@@ -10,7 +10,7 @@
 # [X] Figure out how to update messages table with each thread's msgs/thread_id
 # [X] Redesign Gmail API so it's easier to get msgs/threads
 # [ ] Figure out how to give unique ids to drafts even when some drafts already in db
-import os, sqlite3, json, re, webbrowser, sys
+import os, sqlite3, json, re, webbrowser, sys, _tkinter
 sys.path.append("services")
 from imap import *
 from tkinter import *
@@ -28,8 +28,7 @@ class MailboxView:
         self.service = service
         self.label = label
         self.db_cursor = db_cursor
-        self.titles = StringVar(value=[])
-        self.view = Listbox(self.parent, width=100, height=25, listvariable=self.titles)
+        self.view = Listbox(self.parent, width=100, height=25)
         self.view.pack(fill=BOTH, expand=1)
         #Need to check if db has data before trying to display messages
         try:
@@ -54,17 +53,16 @@ class MailboxView:
         #Place subjects of each message into the Listbox widget
         self.show_subjects()
 
+    def create_msg(self, msg):
+        self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
+                               + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
+                               (msg["uid"], self.label, msg["internalDate"], msg["from"],
+                                msg["to"], msg["subject"], msg["text"]))
     def build_db(self):
-        messages = self.service.get_msgs(self.label, "SINCE 1-May-2019")
-        self.last_uid = messages[-1]["uid"]
-        self.msg_amt = len(messages)
+        self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
+                                                             self.create_msg)
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt", self.msg_amt))
-        for msg in messages:
-            self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
-                                   + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
-                                   (msg["uid"], self.label, msg["internalDate"], msg["from"],
-                                    msg["to"], msg["subject"], msg["text"]))
 
     def refresh_db(self):
         print("Database not rebuilt")
@@ -79,8 +77,15 @@ class MailboxView:
             
 
     def show_subjects(self):
-        #Only show first 125 chars as preview of thread so it fits well onscreen
-        self.titles.set([m[0][:125] for m in self.db_cursor.execute("SELECT subject FROM messages WHERE label = ?", (self.label,))])
+        for subject in self.db_cursor.execute("SELECT subject FROM messages WHERE label = ?", (self.label,)):
+            try:
+                self.view.insert("end", subject[0])
+            except _tkinter.TclError:
+                #Some characters can't be displayed; char code is out of range
+                #Exclude undisplayable chars (a hacky fix, but a simple one!)
+                valid_chars = [c for c in subject[0] if ord(c) in range(65536)]
+                self.view.insert("end", ''.join(valid_chars))
+                print("Warning: Subject '", subject[0], "'has undisplayable chars in it")
 
     def get_msg(self, index):
         return self.db_cursor.execute("SELECT date, sender, subject, message_text"
@@ -90,9 +95,8 @@ class MailboxView:
     def switch_current_msg(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
         #self.current_msg
-        if len(self.titles.get()) != 0:
-            #curselection() gives list of selected thread titles; just take 1
-            self.current_msg.set(self.view.curselection()[0])
+        #curselection() gives list of selected thread titles; just take 1
+        self.current_msg.set(self.view.curselection()[0])
 
 class MessageView:
     """Purpose: Represents text widget at screen bottom; contains text of message(s)

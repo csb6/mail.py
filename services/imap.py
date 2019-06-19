@@ -37,16 +37,18 @@ class MailService:
             print("Error: UID values have changed:", status)
             sys.exit(1)
 
-    def get_msgs(self, mailbox, criteria):
+    def show_msgs(self, mailbox, criteria, callback):
         print("Getting messages...")
         status, data = self.api.select(mailbox)
         self.error_check(status, "couldn't open mailbox")
         print(" Selected", mailbox)
-        status, all_msgs = self.api.search(None, criteria)
+        status, data = self.api.search(None, criteria)
         self.error_check(status, "couldn't search")
+        all_msgs = data[0].split()
         print(" Searched using:", criteria)
-        msgs = []
-        for n in all_msgs[0].split()[:25]:
+        last_uid = None
+        msg_amt = len(all_msgs)
+        for i, n in enumerate(all_msgs):
             msg = {}
             status, msg_data = self.api.fetch(n, '(UID RFC822)')
             self.error_check(status, "couldn't fetch " + str(n))
@@ -71,9 +73,11 @@ class MailService:
                     if part.get_content_type() == "text/plain":
                         msg["text"] = part.get_content()
                         break
-            msgs.append(msg)
+            callback(msg)
+            if i == (msg_amt-1):
+                last_uid = msg["uid"]
         print(" All messages downloaded")
-        return msgs
+        return last_uid, msg_amt
 
     def is_synced(self, mailbox, last_uid, client_msg_amt):
         status, server_msg_amt = self.api.select(mailbox)
