@@ -1,15 +1,12 @@
 #TODO:
 # [ ] Prettify Tk interface
-# [X] Figure out how/when to batch Gmail API requests
+# [X] Figure out how/when to batch IMAP requests
 # [ ] Work on performance/organizing code
-# [X] Wrap up API object/common method calls in a class
-# [X] Use threads.list instead of messages.list
-# [X] Figure out how to limit message results to inbox
-# [X] Set-up/plan tables for sqlite3 database
-# [X] Figure out how to orient program around threads, not messages
-# [X] Figure out how to update messages table with each thread's msgs/thread_id
-# [X] Redesign Gmail API so it's easier to get msgs/threads
-# [ ] Figure out how to give unique ids to drafts even when some drafts already in db
+# [ ] Finish implementing mailbox syncing
+# [ ] Add support for multiple mailboxes, shown in sidebar
+# [ ] Have db contain messages from all labels
+# [ ] Unite SQL config table with config.json
+# [ ] Determine if SSL is properly implemented/secure
 import os, sqlite3, json, re, webbrowser, sys, _tkinter
 sys.path.append("services")
 from imap import *
@@ -64,6 +61,7 @@ class MailboxView:
         else:
             self.refresh_db()
 
+        self.titles = []
         self.current_msg = IntVar(value=0)
         self.view.bind("<<ListboxSelect>>", self.switch_current_msg)
         #Place subjects of each message into the Listbox widget
@@ -93,13 +91,15 @@ class MailboxView:
             
 
     def show_subjects(self):
-        for subject in self.db_cursor.execute("SELECT subject FROM messages WHERE label = ?", (self.label,)):
-            safe_insert(self.view, "end", subject[0])
+        for id_, subject in self.db_cursor.execute("SELECT id, subject FROM messages WHERE label = ?", (self.label,)):
+            safe_insert(self.view, "end", subject)
+            #Map index in Listbox to id of message to retrieve
+            self.titles.append(id_)
 
     def get_msg(self, index):
         return self.db_cursor.execute("SELECT date, sender, subject, message_text"
-                                      +" FROM messages m WHERE id = ? ORDER BY date DESC",
-                                      (index+1,)).fetchone()
+                                      +" FROM messages WHERE id = ? ORDER BY date DESC",
+                                      (self.titles[index],)).fetchone()
 
     def switch_current_msg(self, event):
         #This function implicitly calls MessageView.switch_view() by updating
