@@ -21,6 +21,23 @@ if sys.platform == "darwin":
 else:
     LINK_CURSOR = "hand1"
 
+def safe_insert(widget, coords, content, tags=("",)):
+    try:
+        if tags != ("",):
+            widget.insert(coords, content, tags)
+        else:
+            widget.insert(coords, content)
+    except _tkinter.TclError:
+        #Some characters can't be displayed; char code is out of range
+        #Exclude undisplayable chars (a hacky fix, but a simple one!)
+        valid_chars = [c for c in content if ord(c) in range(65536)]
+        if tags != ("",):
+            widget.insert(coords, ''.join(valid_chars), tags)
+        else:
+            widget.insert(coords, ''.join(valid_chars))
+        print("Warning: '" + content, "'has undisplayable chars in it")
+
+
 class MailboxView:
     """Purpose: Show an interactive list of all messages in a mailbox"""
     def __init__(self, parent, service, label, db_cursor):
@@ -78,14 +95,7 @@ class MailboxView:
 
     def show_subjects(self):
         for subject in self.db_cursor.execute("SELECT subject FROM messages WHERE label = ?", (self.label,)):
-            try:
-                self.view.insert("end", subject[0])
-            except _tkinter.TclError:
-                #Some characters can't be displayed; char code is out of range
-                #Exclude undisplayable chars (a hacky fix, but a simple one!)
-                valid_chars = [c for c in subject[0] if ord(c) in range(65536)]
-                self.view.insert("end", ''.join(valid_chars))
-                print("Warning: Subject '", subject[0], "'has undisplayable chars in it")
+            safe_insert(self.view, "end", subject[0])
 
     def get_msg(self, index):
         return self.db_cursor.execute("SELECT date, sender, subject, message_text"
@@ -136,8 +146,8 @@ class MessageView:
         index = self.mailbox.current_msg.get()
         self.view.delete("0.0", "end")
         msg = self.mailbox.get_msg(index)
-        self.view.insert("end", f"Date: {msg[0]}\nTo: {USER}\nFrom: {msg[1]}\nSubject: {msg[2]}\n\n", ("message_header",))
-        self.view.insert("end", msg[3] + "\n")
+        safe_insert(self.view, "end", f"Date: {msg[0]}\nTo: {USER}\nFrom: {msg[1]}\nSubject: {msg[2]}\n\n", tags=("message_header",))
+        safe_insert(self.view, "end", msg[3] + "\n")
         self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
         self.view.configure(state="disabled")
         #Make all URLs in text into clickable links
