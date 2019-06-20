@@ -73,13 +73,27 @@ class MailService:
                 print("Time string failed to match format:", date_str)
                 msg["internalDate"] = date_str
             msg["text"] = ""
+            msg["type"] = "text"
             if not raw_msg.is_multipart():
+                print("Subject:", msg["subject"], "Content Type:", part.get_content_type())
+                if "html" in part.get_content_type():
+                    msg["type"] = "html"
                 msg["text"] = raw_msg.get_content()
             else:
-                for part in raw_msg.get_payload():
+                found = False
+                for part in raw_msg.walk():
                     if part.get_content_type() == "text/plain":
                         msg["text"] = part.get_content()
+                        found = True
                         break
+                if not found:
+                    for part in raw_msg.walk():
+                        content_type = part.get_content_type()
+                        print("Subject:", msg["subject"], "Content Type:", content_type)
+                        if "html" in content_type:
+                            msg["text"] = part.get_content()
+                            msg["type"] = "html"
+                            break
             callback(msg)
             if i == (msg_amt-1):
                 last_uid = msg["uid"]

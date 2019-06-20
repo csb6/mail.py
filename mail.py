@@ -18,9 +18,9 @@ if sys.platform == "darwin":
 else:
     LINK_CURSOR = "hand1"
 
-def safe_insert(widget, coords, content, tags=("",)):
+def safe_insert(widget, coords, content, tags=tuple()):
     try:
-        if tags != ("",):
+        if tags:
             widget.insert(coords, content, tags)
         else:
             widget.insert(coords, content)
@@ -28,7 +28,7 @@ def safe_insert(widget, coords, content, tags=("",)):
         #Some characters can't be displayed; char code is out of range
         #Exclude undisplayable chars (a hacky fix, but a simple one!)
         valid_chars = [c for c in content if ord(c) in range(65536)]
-        if tags != ("",):
+        if tags:
             widget.insert(coords, ''.join(valid_chars), tags)
         else:
             widget.insert(coords, ''.join(valid_chars))
@@ -50,7 +50,7 @@ class MailboxView:
             self.db_cursor.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, UID INT,"
                                    + " label VARCHAR, date INT, sender VARCHAR,"
                                    + " recipient VARCHAR, subject VARCHAR,"
-                                   + " message_text VARCHAR)")
+                                   + " type VARCHAR, message_text VARCHAR)")
             self.db_cursor.execute("CREATE TABLE drafts (id INTEGER PRIMARY KEY,"
                                    + " recipient VARCHAR, subject VARCHAR,"
                                    + " message_text VARCHAR)")
@@ -69,10 +69,10 @@ class MailboxView:
 
     def create_msg(self, msg):
         self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
-                               + " subject, message_text) VALUES (?,?,?,?,?,?,?)",
+                               + " subject, type, message_text) VALUES (?,?,?,?,?,?,?,?)",
                                (msg["uid"], self.label, msg["internalDate"], msg["from"],
-                                msg["to"], msg["subject"], msg["text"]))
-    def build_db(self, msg):
+                                msg["to"], msg["subject"], msg["type"], msg["text"]))
+    def build_db(self):
         self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
                                                              self.create_msg)
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
