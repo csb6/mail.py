@@ -72,6 +72,7 @@ class MailboxView:
                                + " subject, type, message_text) VALUES (?,?,?,?,?,?,?,?)",
                                (msg["uid"], self.label, msg["internalDate"], msg["from"],
                                 msg["to"], msg["subject"], msg["type"], msg["text"]))
+
     def build_db(self):
         self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
                                                              self.create_msg)
@@ -109,7 +110,8 @@ class MailboxView:
 
     def show_subjects(self):
         for id_, subject in self.db_cursor.execute("SELECT id, subject FROM messages WHERE label = ?", (self.label,)):
-            safe_insert(self.view, "end", subject)
+            #Insert with small margin on left
+            safe_insert(self.view, "end", "  "+subject)
             #Map index in Listbox to id of message to retrieve
             self.titles.append(id_)
 
@@ -155,7 +157,7 @@ class MessageView:
             if line >= char_line and letter >= char_letter:
                 start, end = ranges[i-1], ranges[i]
                 break
-        webbrowser.open_new_tab(self.view.get(start, end).strip().strip("<>"))
+        webbrowser.open_new_tab(self.view.get(start, end).strip().strip("<>()"))
 
     def switch_view(self, name, index, mode):
         self.view.configure(state="normal")
@@ -168,7 +170,7 @@ class MessageView:
         self.view.configure(state="disabled")
         #Make all URLs in text into clickable links
         for i, row in enumerate(self.view.get("0.0", "end").split("\n")):
-            for match in re.finditer(r'<?https?://.+>?(\s|$)', row):
+            for match in re.finditer(r'<?https?://[^\s]+>?((?<!\s)|$)', row):
                 self.view.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
 
 class App:
