@@ -19,15 +19,9 @@ class MailService:
             sys.exit(1)
         print("Logged in to IMAP")
 
-        self.smtp = smtplib.SMTP_SSL("smtp.gmail.com")
-        try:
-            self.smtp.ehlo_or_helo_if_needed()
-            self.smtp.login(USER, PASSWORD)
-        except smtplib.SMTPException as e:
-            print("Error:", e)
-            sys.exit(1)
-        print("Logged in to SMTP")
-
+        #To speed up startup, only connect right before 1st message sent
+        self.smtp_connected = False
+        
     def error_check(self, status, message):
         if "OK" not in status:
             print("Error:", message)
@@ -111,6 +105,17 @@ class MailService:
                and data[0].endswith(bytes(str(last_uid), "utf-8") + b')')
 
     def send_msg(self, to, subject, text):
+        if not self.smtp_connected:
+            self.smtp = smtplib.SMTP_SSL("smtp.gmail.com")
+            try:
+                self.smtp.ehlo_or_helo_if_needed()
+                self.smtp.login(USER, PASSWORD)
+                self.smtp_connected = True
+            except smtplib.SMTPException as e:
+                print("Error:", e)
+                sys.exit(1)
+            print("Logged in to SMTP")
+
         msg = MIMEText(text)
         msg["to"], msg["from"], msg["subject"] = to, USER, subject
         try:

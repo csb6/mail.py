@@ -7,6 +7,8 @@
 # [ ] Have db contain messages from all labels
 # [ ] Unite SQL config table with config.json
 # [ ] Determine if SSL is properly implemented/secure
+# [ ] Change MailService.is_synced() to sync_status, returning
+#     info about if synced (if not, say how many messages added/deleted)
 import os, sqlite3, json, re, webbrowser, sys, _tkinter
 sys.path.append("services")
 from imap import *
