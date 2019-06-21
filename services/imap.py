@@ -69,8 +69,8 @@ class MailService:
             msg["text"] = ""
             msg["type"] = "text"
             if not raw_msg.is_multipart():
-                print("Subject:", msg["subject"], "Content Type:", part.get_content_type())
-                if "html" in part.get_content_type():
+                print("Subject:", msg["subject"], "Content Type:", raw_msg.get_content_type())
+                if "html" in raw_msg.get_content_type():
                     msg["type"] = "html"
                 msg["text"] = raw_msg.get_content()
             else:

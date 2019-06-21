@@ -34,15 +34,20 @@ def safe_insert(widget, coords, content, tags=tuple()):
             widget.insert(coords, ''.join(valid_chars), tags)
         else:
             widget.insert(coords, ''.join(valid_chars))
-        print("Warning: '" + content, "'has undisplayable chars in it")
+        print("Warning: '" + content + "' has undisplayable chars in it")
 
 class MailboxView:
     """Purpose: Show an interactive list of all messages in a mailbox"""
     def __init__(self, parent, service, label, db_cursor):
+        #The Tk object that all widgets in this object are children of
         self.parent = parent
+        #The email service protocol object (e.g. for IMAP) used to get/send emails
         self.service = service
+        #The mailbox name on the server
         self.label = label
+        #The local database file used to store emails/other data
         self.db_cursor = db_cursor
+        #The large widget listing subjects of all messages in mailbox
         self.view = Listbox(self.parent, width=100, height=25)
         self.view.pack(fill=BOTH, expand=1)
         #Need to check if db has data before trying to display messages
@@ -63,25 +68,30 @@ class MailboxView:
         else:
             self.refresh_db()
 
+        #The list of db primary keys for emails onscreen; index is result of curselection
         self.titles = []
+        #The index of the currently-selected email; switch_current_msg called when changed
         self.current_msg = IntVar(value=0)
         self.view.bind("<<ListboxSelect>>", self.switch_current_msg)
         #Place subjects of each message into the Listbox widget
         self.show_subjects()
 
     def create_msg(self, msg):
+        #Callback passed to MailService.show_msgs(); adds new msgs to database
         self.db_cursor.execute("INSERT INTO messages (uid, label, date, sender, recipient,"
                                + " subject, type, message_text) VALUES (?,?,?,?,?,?,?,?)",
                                (msg["uid"], self.label, msg["internalDate"], msg["from"],
                                 msg["to"], msg["subject"], msg["type"], msg["text"]))
 
     def build_db(self):
+        #Adds all messages from current mailbox to db
         self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
                                                              self.create_msg)
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
         self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt", self.msg_amt))
 
     def add_updated_msg(self, msg):
+        #Callback passed to MailService.show_msgs(); adds only new msgs to db
         if not self.db_cursor.execute("SELECT id FROM messages WHERE uid = ?",
                                       (msg["uid"],)).fetchone():
             print("Added", msg["uid"])
@@ -91,6 +101,7 @@ class MailboxView:
             print("Database already has", msg["uid"])
 
     def refresh_db(self):
+        #Updates database with changes since last sync
         print("Database not rebuilt")
         self.last_uid = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
                                                ("last_uid",)).fetchone()[0]
@@ -111,6 +122,7 @@ class MailboxView:
             print("Database now synced")
 
     def show_subjects(self):
+        #Fills Listbox with subjects of each message
         for id_, subject in self.db_cursor.execute("SELECT id, subject FROM messages WHERE label = ?", (self.label,)):
             #Insert with small margin on left
             safe_insert(self.view, "end", "  "+subject)
@@ -118,6 +130,7 @@ class MailboxView:
             self.titles.append(id_)
 
     def get_msg(self, index):
+        #Retrieves msg from database
         return self.db_cursor.execute("SELECT date, sender, subject, message_text"
                                       +" FROM messages WHERE id = ? ORDER BY date DESC",
                                       (self.titles[index],)).fetchone()
