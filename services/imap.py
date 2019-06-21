@@ -1,19 +1,13 @@
 import imaplib, smtplib, sys, email, email.policy, json, re, datetime
 from email.mime.text import MIMEText
 
-config_file = open("config.json")
-config = json.loads(config_file.read())
-config_file.close()
-HOST = config["host"]
-USER = config["username"]
-PASSWORD = config["password"]
-
 class MailService:
-    def __init__(self):
-        self.api = imaplib.IMAP4_SSL(HOST)
-        print("Connected to", HOST)
+    def __init__(self, config):
+        self.config = config
+        self.api = imaplib.IMAP4_SSL(config["host"])
+        print("Connected to", config["host"])
         try:
-            self.api.login(USER, PASSWORD)
+            self.api.login(config["username"], config["password"])
         except imaplib.IMAP4.error:
             print("Error: Cannot login to IMAP")
             sys.exit(1)
@@ -21,7 +15,7 @@ class MailService:
 
         #To speed up startup, only connect right before 1st message sent
         self.smtp_connected = False
-        
+
     def error_check(self, status, message):
         if "OK" not in status:
             print("Error:", message)
@@ -109,7 +103,7 @@ class MailService:
             self.smtp = smtplib.SMTP_SSL("smtp.gmail.com")
             try:
                 self.smtp.ehlo_or_helo_if_needed()
-                self.smtp.login(USER, PASSWORD)
+                self.smtp.login(self.config["username"], self.config["password"])
                 self.smtp_connected = True
             except smtplib.SMTPException as e:
                 print("Error:", e)
@@ -117,9 +111,9 @@ class MailService:
             print("Logged in to SMTP")
 
         msg = MIMEText(text)
-        msg["to"], msg["from"], msg["subject"] = to, USER, subject
+        msg["to"], msg["from"], msg["subject"] = to, self.config["username"], subject
         try:
-            self.smtp.sendmail(USER, to, msg.as_string())
+            self.smtp.sendmail(self.config["username"], to, msg.as_string())
             return True
         except smtplib.SMTPException as e:
             print("Error Sending:", e)

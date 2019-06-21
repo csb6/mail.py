@@ -131,7 +131,7 @@ class MailboxView:
 
     def get_msg(self, index):
         #Retrieves msg from database
-        return self.db_cursor.execute("SELECT date, sender, subject, message_text"
+        return self.db_cursor.execute("SELECT date, recipient, sender, subject, message_text"
                                       +" FROM messages WHERE id = ? ORDER BY date DESC",
                                       (self.titles[index],)).fetchone()
 
@@ -179,8 +179,8 @@ class MessageView:
         index = self.mailbox.current_msg.get()
         self.view.delete("0.0", "end")
         msg = self.mailbox.get_msg(index)
-        safe_insert(self.view, "end", f"Date: {msg[0]}\nTo: {USER}\nFrom: {msg[1]}\nSubject: {msg[2]}\n\n", tags=("message_header",))
-        safe_insert(self.view, "end", msg[3] + "\n")
+        safe_insert(self.view, "end", f"Date: {msg[0]}\nTo: {msg[1]}\nFrom: {msg[2]}\nSubject: {msg[3]}\n\n", tags=("message_header",))
+        safe_insert(self.view, "end", msg[4] + "\n")
         self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
         self.view.configure(state="disabled")
         #Make all URLs in text into clickable links
@@ -189,12 +189,13 @@ class MessageView:
                 self.view.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
 
 class App:
-    def __init__(self, parent):
+    def __init__(self, parent, config):
         self.parent = parent
+        self.config = config
         compose = Button(self.parent, text="Compose")
         compose.bind("<Button-1>", lambda e: self.compose_msg())
         compose.pack(ipadx=5)
-        self.service = MailService()
+        self.service = MailService(self.config)
         self.db = sqlite3.connect('mail.db')
         self.db_cursor = self.db.cursor()
         self.inbox = MailboxView(self.parent, self.service, "INBOX", self.db_cursor)
@@ -252,7 +253,11 @@ class App:
 def main():
     root = Tk()
     root.title("Email Client")
-    app = App(root)
+    config_file = open("config.json")
+    config = json.loads(config_file.read())
+    config_file.close()
+
+    app = App(root, config)
     root.mainloop()
     app.cleanup_db()
 
