@@ -7,4 +7,5 @@ token.pickle
 __pycache__/*
 services/*~
 services/*#
+services/*.#
 services/__pycache__/*
