@@ -3,10 +3,9 @@ from email.mime.text import MIMEText
 
 class MailService:
     def __init__(self):
-        config_file = open("config.json")
-        self.config = json.loads(config_file.read())
-        config_file.close()
- 
+        with open("config.json") as config_file:
+            self.config = json.loads(config_file.read())
+
         self.api = imaplib.IMAP4_SSL(self.config["host"])
         print("Connected to", self.config["host"])
         try:

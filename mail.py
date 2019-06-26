@@ -2,12 +2,12 @@
 # [ ] Prettify Tk interface
 # [X] Figure out how/when to batch IMAP requests
 # [ ] Work on performance/organizing code
-# [ ] Finish implementing mailbox syncing
+# [X] Finish implementing mailbox syncing
 # [ ] Add support for multiple mailboxes, shown in sidebar
 # [ ] Have db contain messages from all labels
 # [ ] Unite SQL config table with config.json
 # [ ] Determine if SSL is properly implemented/secure
-# [ ] Change MailService.is_synced() to sync_status, returning
+# [X] Change MailService.is_synced() to sync_status, returning
 #     info about if synced (if not, say how many messages added/deleted)
 import os, sqlite3, json, re, webbrowser, sys, _tkinter
 sys.path.append("services")
@@ -21,6 +21,8 @@ else:
     LINK_CURSOR = "hand1"
 
 def safe_insert(widget, coords, content, tags=tuple()):
+    #Acts like TextWidget.insert(), but ensures that only characters
+    #which Tk can display are in the inserted string
     try:
         if tags:
             widget.insert(coords, content, tags)
@@ -109,25 +111,18 @@ class MailboxView:
                                               ("msg_amt",)).fetchone()[0]
         is_synced, server_msg_amt, new_msgs = self.service.sync_status(self.label, self.last_uid,
                                                                        self.msg_amt)
-        if is_synced:
+        if is_synced and not new_msgs:
             print("Database is synced with server")
         else:
             print("Database isn't synced with server")
-            #TODO:
-            #1. Update msg_amt if it changed
-            #2. Check if any new msgs (new msgs = any uids > last_uid); add them
-            #   to db, update last_uid with new id if any
-            #3. Check if any msgs from last_uid down to lowest recorded uid in db
-            #   exists on server (find out how to batch?); remove those that don't exist
-            #4. Print out status message, return
-            #Replace following line with service.get_update_criteria(label, uid) ???
+            #Add any new messages if needed
             if new_msgs:
                 #Make list of msgs to attempt to show; ex: b'2417,2418,2419'
                 criteria = b','.join(new_msgs)
                 self.last_uid = self.service.show_msgs(self.label, criteria,
                                                        self.add_updated_msg)
 
-            #Verify all messages currently in database
+            #Verify all messages currently in database as present on server
             server_uids = self.service.get_all_uids(self.label)
             for id_, client_uid in self.db_cursor.execute("SELECT id, uid FROM messages WHERE label = ?", (self.label,)):
                 #Remove any messages that the server removed since last sync
