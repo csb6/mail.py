@@ -124,11 +124,12 @@ class MailboxController:
     def refresh_db(self):
         #Updates database with changes since last sync
         print("Database not rebuilt")
-        self.last_uid = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
-                                               ("last_uid",)).fetchone()[0]
-        self.msg_amt = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
-                                              ("msg_amt",)).fetchone()[0]
-        is_synced, server_msg_amt, new_msgs = self.service.sync_status(self.label, self.last_uid,
+        (self.last_uid,) = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                               ("last_uid",)).fetchone()
+        (self.msg_amt,) = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
+                                              ("msg_amt",)).fetchone()
+        is_synced, server_msg_amt, new_msgs = self.service.sync_status(self.label,
+                                                                       self.last_uid,
                                                                        self.msg_amt)
         if is_synced and not new_msgs:
             print("Database is synced with server")
@@ -143,7 +144,7 @@ class MailboxController:
 
             #Verify all messages currently in database as present on server
             server_uids = self.service.get_all_uids(self.label)
-            for id_, client_uid in self.db_cursor.execute("SELECT id, uid FROM messages WHERE label = ?", (self.label,)):
+            for (client_uid,) in self.db_cursor.execute("SELECT uid FROM messages WHERE label = ?", (self.label,)):
                 #Remove any messages that the server removed since last sync
                 if client_uid not in server_uids:
                     self.db_cursor.execute("DELETE FROM messages WHERE label = ? AND uid = ?",
@@ -189,13 +190,12 @@ class MessageView:
                                   overstrike=True, font="TkFixedFont 25 bold")
         self.widget.tag_configure("link", foreground="blue", underline=True)
         self.widget.tag_bind("link", "<Enter>", lambda e: self.widget.config(cursor=LINK_CURSOR))
-        self.widget.tag_bind("link", "<Leave>", lambda e: self.widget.config(cursor="left_ptr"))
+        self.widget.tag_bind("link", "<Leave>", lambda e: self.widget.config(cursor=""))
         self.widget.tag_bind("link", "<Button-1>", self.open_link)
 
     def open_link(self, event):
         char = self.widget.index(f"@{event.x},{event.y}")
-        tag = self.widget.tag_names(char)
-        ranges = [str(i) for i in self.widget.tag_ranges(tag)]
+        ranges = [str(i) for i in self.widget.tag_ranges("link")]
         char_line, char_letter = [int(n) for n in char.split(".")]
         #Look at every second index; will give end-bound of link's location
         for i in range(1, len(ranges), 2):
