@@ -2,12 +2,15 @@ import imaplib, smtplib, sys, email, email.policy, json, re, datetime
 from email.mime.text import MIMEText
 
 class MailService:
-    def __init__(self, config):
-        self.config = config
-        self.api = imaplib.IMAP4_SSL(config["host"])
-        print("Connected to", config["host"])
+    def __init__(self):
+        config_file = open("config.json")
+        self.config = json.loads(config_file.read())
+        config_file.close()
+ 
+        self.api = imaplib.IMAP4_SSL(self.config["host"])
+        print("Connected to", self.config["host"])
         try:
-            self.api.login(config["username"], config["password"])
+            self.api.login(self.config["username"], self.config["password"])
         except imaplib.IMAP4.error:
             print("Error: Cannot login to IMAP")
             sys.exit(1)
@@ -25,12 +28,11 @@ class MailService:
             print("Error: UID values have changed:", status)
             sys.exit(1)
 
-    def get_id(self, mailbox, uid):
-        print("Getting id for", type(uid), uid)
+    def get_all_uids(self, mailbox):
         status, data = self.api.select(mailbox)
         self.error_check(status, "couldn't open mailbox")
-        status, data = self.api.search(None, "UID "+str(uid))
-        return data[0]
+        status, data = self.api.uid("SEARCH", b'ALL')
+        return [int(i) for i in data[0].split()]
 
     def show_msgs(self, mailbox, criteria, callback):
         print("Getting messages...")
@@ -41,6 +43,7 @@ class MailService:
         self.error_check(status, "couldn't search")
         all_msgs = data[0].split()
         print(" Searched using:", criteria)
+        print(" Server data:", all_msgs)
         last_uid = None
         msg_amt = len(all_msgs)
         for i, n in enumerate(all_msgs):
@@ -86,17 +89,23 @@ class MailService:
             if i == (msg_amt-1):
                 last_uid = msg["uid"]
         print(" All messages downloaded")
-        return last_uid, msg_amt
+        return last_uid
 
-    def is_synced(self, mailbox, last_uid, client_msg_amt):
-        status, server_msg_amt = self.api.select(mailbox)
+    def sync_status(self, mailbox, last_uid, client_msg_amt):
+        last_uid_str = bytes(str(last_uid), "utf-8")
+        status, data = self.api.select(mailbox)
         self.error_check(status, "couldn't open mailbox")
-        status, data = self.api.uid("FETCH", bytes(str(last_uid), "utf-8") + b':*', "UID")
+        server_msg_amt = int(data[0])
+
+        status, data = self.api.uid("FETCH", last_uid_str + b':*', "UID")
+        new_msgs = [i.split()[0] for i in data
+                    if not i.endswith(b' '+last_uid_str+b')')]
         self.error_check(status, "couldn't perform FETCH sync")
-        print(data, client_msg_amt, server_msg_amt[0])
+        print(data, client_msg_amt, server_msg_amt, new_msgs)
         #Ensure same amt of msgs as last sync, no new msgs added/removed
-        return len(data) == 1 and client_msg_amt == int(server_msg_amt[0]) \
-               and data[0].endswith(bytes(str(last_uid), "utf-8") + b')')
+        is_synced = len(data) == 1 and client_msg_amt == server_msg_amt \
+                    and data[-1].endswith(b' '+last_uid_str + b')')
+        return is_synced, server_msg_amt, new_msgs
 
     def send_msg(self, to, subject, text):
         if not self.smtp_connected:

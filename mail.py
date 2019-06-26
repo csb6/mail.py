@@ -107,14 +107,40 @@ class MailboxView:
                                                ("last_uid",)).fetchone()[0]
         self.msg_amt = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
                                               ("msg_amt",)).fetchone()[0]
-        if self.service.is_synced(self.label, self.last_uid, self.msg_amt):
+        is_synced, server_msg_amt, new_msgs = self.service.sync_status(self.label, self.last_uid,
+                                                                       self.msg_amt)
+        if is_synced:
             print("Database is synced with server")
         else:
             print("Database isn't synced with server")
-            criteria = self.service.get_id(self.label, self.last_uid) + b':*'
-            self.last_uid, added_msg_amt = self.service.show_msgs(self.label, criteria,
-                                                                 self.add_updated_msg)
-            self.msg_amt += added_msg_amt
+            #TODO:
+            #1. Update msg_amt if it changed
+            #2. Check if any new msgs (new msgs = any uids > last_uid); add them
+            #   to db, update last_uid with new id if any
+            #3. Check if any msgs from last_uid down to lowest recorded uid in db
+            #   exists on server (find out how to batch?); remove those that don't exist
+            #4. Print out status message, return
+            #Replace following line with service.get_update_criteria(label, uid) ???
+            if new_msgs:
+                #Make list of msgs to attempt to show; ex: b'2417,2418,2419'
+                criteria = b','.join(new_msgs)
+                self.last_uid = self.service.show_msgs(self.label, criteria,
+                                                       self.add_updated_msg)
+
+            #Verify all messages currently in database
+            server_uids = self.service.get_all_uids(self.label)
+            for id_, client_uid in self.db_cursor.execute("SELECT id, uid FROM messages WHERE label = ?", (self.label,)):
+                #Remove any messages that the server removed since last sync
+                if client_uid not in server_uids:
+                    self.db_cursor.execute("DELETE FROM messages WHERE label = ? AND uid = ?",
+                                           (self.label, client_uid))
+                    print("Removed", client_uid)
+
+            assert len(self.db_cursor.execute("SELECT id FROM messages WHERE label = ?",
+                                              (self.label,)).fetchall()) == len(server_uids), "Number of messages on server not matching number of ids on client"
+            assert len(server_uids) == server_msg_amt
+
+            self.msg_amt = server_msg_amt
             self.db_cursor.execute("UPDATE config SET value = ? WHERE key = ?",
                                    (self.last_uid, "last_uid"))
             self.db_cursor.execute("UPDATE config SET value = ? WHERE key = ?",
@@ -189,13 +215,12 @@ class MessageView:
                 self.view.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
 
 class App:
-    def __init__(self, parent, config):
+    def __init__(self, parent):
         self.parent = parent
-        self.config = config
         compose = Button(self.parent, text="Compose")
         compose.bind("<Button-1>", lambda e: self.compose_msg())
         compose.pack(ipadx=5)
-        self.service = MailService(self.config)
+        self.service = MailService()
         self.db = sqlite3.connect('mail.db')
         self.db_cursor = self.db.cursor()
         self.inbox = MailboxView(self.parent, self.service, "INBOX", self.db_cursor)
@@ -253,11 +278,7 @@ class App:
 def main():
     root = Tk()
     root.title("Email Client")
-    config_file = open("config.json")
-    config = json.loads(config_file.read())
-    config_file.close()
-
-    app = App(root, config)
+    app = App(root)
     root.mainloop()
     app.cleanup_db()
 
