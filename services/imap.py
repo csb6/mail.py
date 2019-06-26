@@ -88,7 +88,7 @@ class MailService:
             if i == (msg_amt-1):
                 last_uid = msg["uid"]
         print(" All messages downloaded")
-        return last_uid
+        return last_uid, msg_amt
 
     def sync_status(self, mailbox, last_uid, client_msg_amt):
         last_uid_str = bytes(str(last_uid), "utf-8")

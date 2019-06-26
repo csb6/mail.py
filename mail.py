@@ -76,7 +76,8 @@ class MailboxController:
         self.msg_view = MessageView(self.parent)
         #Need to check if db has data before trying to display messages
         try:
-            self.db_cursor.execute("SELECT id FROM messages LIMIT 1")
+            self.db_cursor.execute("SELECT id FROM messages WHERE label = ? LIMIT 1",
+                                   (self.label,))
         except sqlite3.OperationalError:
             self.db_cursor.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, UID INT,"
                                    + " label VARCHAR, date INT, sender VARCHAR,"
@@ -108,8 +109,10 @@ class MailboxController:
         #Adds all messages from current mailbox to db
         self.last_uid, self.msg_amt = self.service.show_msgs(self.label, "ALL",
                                                              self.create_msg)
-        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid", self.last_uid))
-        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt", self.msg_amt))
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("last_uid_"+self.label,
+                                                                   self.last_uid))
+        self.db_cursor.execute("INSERT INTO config VALUES (?,?)", ("msg_amt_"+self.label,
+                                                                   self.msg_amt))
 
     def add_updated_msg(self, msg):
         #Callback passed to MailService.show_msgs(); adds only new msgs to db
@@ -125,9 +128,9 @@ class MailboxController:
         #Updates database with changes since last sync
         print("Database not rebuilt")
         (self.last_uid,) = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
-                                               ("last_uid",)).fetchone()
+                                               ("last_uid_"+self.label,)).fetchone()
         (self.msg_amt,) = self.db_cursor.execute("SELECT value FROM config WHERE key = ?",
-                                              ("msg_amt",)).fetchone()
+                                              ("msg_amt_"+self.label,)).fetchone()
         is_synced, server_msg_amt, new_msgs = self.service.sync_status(self.label,
                                                                        self.last_uid,
                                                                        self.msg_amt)
@@ -139,8 +142,8 @@ class MailboxController:
             if new_msgs:
                 #Make list of msgs to attempt to show; ex: b'2417,2418,2419'
                 criteria = b','.join(new_msgs)
-                self.last_uid = self.service.show_msgs(self.label, criteria,
-                                                       self.add_updated_msg)
+                self.last_uid, msg_amt = self.service.show_msgs(self.label, criteria,
+                                                                self.add_updated_msg)
 
             #Verify all messages currently in database as present on server
             server_uids = self.service.get_all_uids(self.label)
@@ -157,9 +160,9 @@ class MailboxController:
 
             self.msg_amt = server_msg_amt
             self.db_cursor.execute("UPDATE config SET value = ? WHERE key = ?",
-                                   (self.last_uid, "last_uid"))
+                                   (self.last_uid, "last_uid_"+self.label))
             self.db_cursor.execute("UPDATE config SET value = ? WHERE key = ?",
-                                   (self.msg_amt, "msg_amt"))
+                                   (self.msg_amt, "msg_amt_"+self.label))
             print("Database now synced")
 
     def show_subjects(self):
