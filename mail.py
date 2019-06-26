@@ -9,6 +9,8 @@
 # [ ] Determine if SSL is properly implemented/secure
 # [X] Change MailService.is_synced() to sync_status, returning
 #     info about if synced (if not, say how many messages added/deleted)
+# [ ] Add code for switching MailboxControllers; make sure to disable
+#     trace_add() bindings for inactive controllers
 import os, sqlite3, json, re, webbrowser, sys, _tkinter
 sys.path.append("services")
 from imap import *
@@ -40,6 +42,25 @@ def safe_insert(widget, coords, content, tags=tuple()):
 
 class MailboxView:
     """Purpose: Show an interactive list of all messages in a mailbox"""
+    def __init__(self, parent):
+        self.parent = parent
+        #The large widget listing subjects of all messages in mailbox
+        self.widget = Listbox(self.parent, width=100, height=25)
+        self.widget.pack(fill=BOTH, expand=1)
+        #The list of db primary keys for emails onscreen; index is result of curselection
+        self.ids = []
+        self.widget.bind("<<ListboxSelect>>", self.switch_current_msg)
+        #The index of the currently-selected email; switch_current_msg called when changed
+        self.current_msg = IntVar(value=0)
+
+    def switch_current_msg(self, event):
+        #This function implicitly calls MailboxController.switch_msg_view() by
+        #updating self.current_msg
+        #curselection() gives list of selected thread titles; just take 1
+        self.current_msg.set(self.widget.curselection()[0])
+
+class MailboxController:
+    """Purpose: Show an interactive list of all messages in a mailbox"""
     def __init__(self, parent, service, label, db_cursor):
         #The Tk object that all widgets in this object are children of
         self.parent = parent
@@ -50,8 +71,9 @@ class MailboxView:
         #The local database file used to store emails/other data
         self.db_cursor = db_cursor
         #The large widget listing subjects of all messages in mailbox
-        self.view = Listbox(self.parent, width=100, height=25)
-        self.view.pack(fill=BOTH, expand=1)
+        self.list_view = MailboxView(self.parent)
+        #The text widget for displaying individual messages
+        self.msg_view = MessageView(self.parent)
         #Need to check if db has data before trying to display messages
         try:
             self.db_cursor.execute("SELECT id FROM messages LIMIT 1")
@@ -70,11 +92,8 @@ class MailboxView:
         else:
             self.refresh_db()
 
-        #The list of db primary keys for emails onscreen; index is result of curselection
-        self.titles = []
-        #The index of the currently-selected email; switch_current_msg called when changed
-        self.current_msg = IntVar(value=0)
-        self.view.bind("<<ListboxSelect>>", self.switch_current_msg)
+        #Switch displayed message when user clicks on subject in ListBox
+        self.list_view.current_msg.trace_add("write", self.switch_msg_view)
         #Place subjects of each message into the Listbox widget
         self.show_subjects()
 
@@ -146,46 +165,37 @@ class MailboxView:
         #Fills Listbox with subjects of each message
         for id_, subject in self.db_cursor.execute("SELECT id, subject FROM messages WHERE label = ?", (self.label,)):
             #Insert with small margin on left
-            safe_insert(self.view, "end", "  "+subject)
+            safe_insert(self.list_view.widget, "end", "  "+subject)
             #Map index in Listbox to id of message to retrieve
-            self.titles.append(id_)
+            self.list_view.ids.append(id_)
 
-    def get_msg(self, index):
-        #Retrieves msg from database
-        return self.db_cursor.execute("SELECT date, recipient, sender, subject, message_text"
-                                      +" FROM messages WHERE id = ? ORDER BY date DESC",
-                                      (self.titles[index],)).fetchone()
-
-    def switch_current_msg(self, event):
-        #This function implicitly calls MessageView.switch_view() by updating
-        #self.current_msg
-        #curselection() gives list of selected thread titles; just take 1
-        self.current_msg.set(self.view.curselection()[0])
+    def switch_msg_view(self, name, i, mode):
+        index = self.list_view.current_msg.get()
+        msg = self.db_cursor.execute("SELECT date, recipient, sender, subject, message_text"
+                                     +" FROM messages WHERE id = ? ORDER BY date DESC",
+                                     (self.list_view.ids[index],)).fetchone()
+        self.msg_view.show(msg)
 
 class MessageView:
     """Purpose: Represents text widget at screen bottom; contains text of message(s)
         from currently selected thread in given mailbox"""
-    def __init__(self, parent, mailbox):
+    def __init__(self, parent):
         self.parent = parent
-        self.mailbox = mailbox
-        self.view = Text(parent, width=50, height=50, font="TkFixedFont 12", state="disabled")
-        self.view.pack(fill=BOTH, expand=1)
-        self.view.tag_configure("message_header", font="TkFixedFont 14",
-                                foreground="blue", relief="raised")
-        self.view.tag_configure("separator", foreground="darkblue",
-                                overstrike=True, font="TkFixedFont 25 bold")
-        self.view.tag_configure("link", foreground="blue", underline=True)
-        self.view.tag_bind("link", "<Enter>", lambda e: self.view.config(cursor=LINK_CURSOR))
-        self.view.tag_bind("link", "<Leave>", lambda e: self.view.config(cursor="left_ptr"))
-        self.view.tag_bind("link", "<Button-1>", self.open_link)
-
-        #Switch displayed thread when user clicks on threads in ListBox
-        self.mailbox.current_msg.trace_add("write", self.switch_view)
+        self.widget = Text(parent, width=50, height=50, font="TkFixedFont 12", state="disabled")
+        self.widget.pack(fill=BOTH, expand=1)
+        self.widget.tag_configure("message_header", font="TkFixedFont 14",
+                                  foreground="blue", relief="raised")
+        self.widget.tag_configure("separator", foreground="darkblue",
+                                  overstrike=True, font="TkFixedFont 25 bold")
+        self.widget.tag_configure("link", foreground="blue", underline=True)
+        self.widget.tag_bind("link", "<Enter>", lambda e: self.widget.config(cursor=LINK_CURSOR))
+        self.widget.tag_bind("link", "<Leave>", lambda e: self.widget.config(cursor="left_ptr"))
+        self.widget.tag_bind("link", "<Button-1>", self.open_link)
 
     def open_link(self, event):
-        char = self.view.index(f"@{event.x},{event.y}")
-        tag = self.view.tag_names(char)
-        ranges = [str(i) for i in self.view.tag_ranges(tag)]
+        char = self.widget.index(f"@{event.x},{event.y}")
+        tag = self.widget.tag_names(char)
+        ranges = [str(i) for i in self.widget.tag_ranges(tag)]
         char_line, char_letter = [int(n) for n in char.split(".")]
         #Look at every second index; will give end-bound of link's location
         for i in range(1, len(ranges), 2):
@@ -193,21 +203,19 @@ class MessageView:
             if line >= char_line and letter >= char_letter:
                 start, end = ranges[i-1], ranges[i]
                 break
-        webbrowser.open_new_tab(self.view.get(start, end).strip().strip("<>()"))
+        webbrowser.open_new_tab(self.widget.get(start, end).strip().strip("<>()"))
 
-    def switch_view(self, name, index, mode):
-        self.view.configure(state="normal")
-        index = self.mailbox.current_msg.get()
-        self.view.delete("0.0", "end")
-        msg = self.mailbox.get_msg(index)
-        safe_insert(self.view, "end", f"Date: {msg[0]}\nTo: {msg[1]}\nFrom: {msg[2]}\nSubject: {msg[3]}\n\n", tags=("message_header",))
-        safe_insert(self.view, "end", msg[4] + "\n")
-        self.view.insert("end", " "*self.view.cget("width") + "\n", ("separator",))
-        self.view.configure(state="disabled")
+    def show(self, msg):
+        self.widget.configure(state="normal")
+        self.widget.delete("0.0", "end")
+        safe_insert(self.widget, "end", f"Date: {msg[0]}\nTo: {msg[1]}\nFrom: {msg[2]}\nSubject: {msg[3]}\n\n", tags=("message_header",))
+        safe_insert(self.widget, "end", msg[4] + "\n")
+        self.widget.insert("end", " "*self.widget.cget("width") + "\n", ("separator",))
+        self.widget.configure(state="disabled")
         #Make all URLs in text into clickable links
-        for i, row in enumerate(self.view.get("0.0", "end").split("\n")):
+        for i, row in enumerate(self.widget.get("0.0", "end").split("\n")):
             for match in re.finditer(r'<?https?://[^\s]+>?((?<!\s)|$)', row):
-                self.view.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
+                self.widget.tag_add("link", f"{i+1}.{match.start()}", f"{i+1}.{match.end()}")
 
 class App:
     def __init__(self, parent):
@@ -218,8 +226,7 @@ class App:
         self.service = MailService()
         self.db = sqlite3.connect('mail.db')
         self.db_cursor = self.db.cursor()
-        self.inbox = MailboxView(self.parent, self.service, "INBOX", self.db_cursor)
-        self.content_view = MessageView(self.parent, self.inbox)
+        self.inbox = MailboxController(self.parent, self.service, "INBOX", self.db_cursor)
         #Add code to close db, db_cursor when app shuts down
 
     def send_msg(self):
